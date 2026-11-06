@@ -75,7 +75,7 @@ export async function syntheticReview(
 		})), cursor: { next: null } });
 	}, { preconnect: () => {} });
 	try {
-		const result = await (await handle(request({ operation: "call", tool: options.tool ?? "reviewSpending", input }), context)).json();
+		const result = await (await handle(request({ operation: "call", tool: options.tool ?? "insights.reviewSpending", input }), context)).json();
 		return { questions, transactionRequests, result };
 	} finally {
 		globalThis.fetch = originalFetch;
@@ -87,7 +87,7 @@ if (import.meta.main) {
 	console.log(JSON.stringify({
 		label: "Synthetic local host demonstration; not a live MCP session or model-generated answer",
 		prompt: "Review my spending. Ask me which accounts and periods to compare.",
-		tool: "reviewSpending", input: {}, questions: run.questions, answer: demoAnswer, result: run.result,
+		tool: "insights.reviewSpending", input: {}, questions: run.questions, answer: demoAnswer, result: run.result,
 	}, null, 2));
 	if (!run.result.ok) process.exitCode = 1;
 }

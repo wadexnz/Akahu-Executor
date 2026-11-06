@@ -20,39 +20,39 @@ Executor stores the tokens and only adds them to HTTPS requests to
 
 | Tool | Purpose |
 | --- | --- |
-| `listAccounts` | Connected accounts and balances |
-| `getTransactions`, `getTransaction` | Settled transactions |
-| `getPendingTransactions` | Pending transactions |
-| `getTransactionSummary` | Totals by category, merchant or type |
-| `compareTransactionInsights` | Compare two periods (see below) |
-| `reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report |
-| `getMe` | The connected Akahu user |
-| `refreshAccounts` | Ask Akahu to refresh; needs approval on every call |
+| `accounts.list` | Connected accounts and balances |
+| `transactions.search`, `transactions.get` | Settled transactions |
+| `transactions.pending` | Pending transactions |
+| `transactions.summary` | Totals by category, merchant or type |
+| `insights.compare` | Compare two periods (see below) |
+| `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report |
+| `identity.me` | The connected Akahu user |
+| `admin.refresh` | Ask Akahu to refresh; needs approval on every call |
 
-All tools except `refreshAccounts` are read-only, and none can make payments.
+All tools except `admin.refresh` are read-only, and none can make payments.
 Each tool declares MCP annotations and an output schema. Category and
 connection listings are not available because they need an Akahu app secret,
 which Personal Apps do not have.
 
 ## Currency totals
 
-`getTransactions` returns `currencies: [{ currency, net_total }]` for the rows
+`transactions.search` returns `currencies: [{ currency, net_total }]` for the rows
 actually returned, not the full history when `truncated` is true.
-`getTransactionSummary` returns a `currencies` array containing each currency's
+`transactions.summary` returns a `currencies` array containing each currency's
 transaction count, signed debit/credit totals and category/merchant/type groups.
 There is no combined total or FX conversion. These replace the previous
 top-level `net_total`, `total_spending`, `total_income` and `groups` fields.
 
 Both tools look up each account's balance currency. Rows with missing currency
 metadata are counted and listed in `unknown_currency_transaction_ids`, but are
-excluded from monetary totals; `getTransactions` still returns those rows.
+excluded from monetary totals; `transactions.search` still returns those rows.
 Failure to fetch account metadata fails the call rather than guessing a unit.
 An original purchase's `fx` currency does not replace the account currency.
 Debit totals include transfers; these tools do not apply the mobile app's rules.
 
 ## Comparing two periods
 
-`compareTransactionInsights` takes explicit account IDs and two non-overlapping
+`insights.compare` takes explicit account IDs and two non-overlapping
 periods with full ISO timestamps (including the Pacific/Auckland offset):
 
 ```json
@@ -79,8 +79,8 @@ but that is guidance, not a security boundary.
 
 Ask your agent: **“Review my spending. Ask me which accounts and periods to compare.”**
 
-`reviewSpending` accepts the same `account_ids`, `baseline` and `comparison`
-arguments as `compareTransactionInsights`, but each may be omitted. It asks for
+`insights.reviewSpending` accepts the same `account_ids`, `baseline` and `comparison`
+arguments as `insights.compare`, but each may be omitted. It asks for
 missing choices through Executor's form elicitation; supplied choices remain
 unchanged. Nothing is preselected, and only NZD accounts with a transaction feed
 are offered. Dates use inclusive ISO timestamps with explicit offsets. If an

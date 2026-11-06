@@ -61,7 +61,7 @@ test("transaction tools keep currencies separate through the public host boundar
 		return result.value;
 	};
 	try {
-		const transactions = await call("getTransactions");
+		const transactions = await call("transactions.search");
 		expect(transactions.count).toBe(6);
 		expect(transactions.truncated).toBe(false);
 		expect(transactions).not.toHaveProperty("net_total");
@@ -72,14 +72,14 @@ test("transaction tools keep currencies separate through the public host boundar
 		expect(transactions.unknown_currency_transaction_ids).toEqual(["trans_unknown", "trans_missing"]);
 		expect(transactions.transactions.map((t: { id: string }) => t.id)).toEqual(rows.map(t => t._id));
 
-		const limited = await call("getTransactions", { limit: 3 });
+		const limited = await call("transactions.search", { limit: 3 });
 		expect(limited.truncated).toBe(true);
 		expect(limited.currencies).toEqual([
 			{ currency: "NZD", net_total: -125.5 }, { currency: "USD", net_total: -50 },
 		]);
 		expect(limited.unknown_currency_transaction_ids).toEqual([]);
 
-		const summary = await call("getTransactionSummary");
+		const summary = await call("transactions.summary");
 		expect(summary.transaction_count).toBe(6);
 		expect(summary).not.toHaveProperty("total_spending");
 		expect(summary.currencies).toEqual([
@@ -89,7 +89,7 @@ test("transaction tools keep currencies separate through the public host boundar
 				groups: [{ name: "Groceries", count: 1, total: -50 }] },
 		]);
 		expect(summary.unknown_currency_transaction_ids).toEqual(["trans_unknown", "trans_missing"]);
-		const spending = await call("getTransactionSummary", { spending_only: true });
+		const spending = await call("transactions.summary", { spending_only: true });
 		expect(spending.transaction_count).toBe(5);
 		expect(spending.currencies).toEqual([
 			{ currency: "NZD", transaction_count: 2, total_spending: -125.5, total_income: 0,
@@ -99,7 +99,7 @@ test("transaction tools keep currencies separate through the public host boundar
 		]);
 		expect(spending.unknown_currency_transaction_ids).toEqual(["trans_unknown", "trans_missing"]);
 
-		const scoped = await call("getTransactionSummary", { account_id: "acc_usd", spending_only: true, group_by: "type" });
+		const scoped = await call("transactions.summary", { account_id: "acc_usd", spending_only: true, group_by: "type" });
 		expect(scoped.currencies).toEqual([
 			{ currency: "USD", transaction_count: 1, total_spending: -50, total_income: 0,
 				groups: [{ name: "DEBIT", count: 1, total: -50 }] },
@@ -107,7 +107,7 @@ test("transaction tools keep currencies separate through the public host boundar
 		expect(scoped.unknown_currency_transaction_ids).toEqual([]);
 
 		accountsFail = true;
-		for (const tool of ["getTransactions", "getTransactionSummary"]) {
+		for (const tool of ["transactions.search", "transactions.summary"]) {
 			const failed = await (await handle(request({ operation: "call", tool, input: {} }), context)).json();
 			expect(failed.ok).toBe(false);
 		}
@@ -160,7 +160,7 @@ test("guided review preserves supplied scope and works without forms when fully 
 	const direct = await syntheticReview(demoScope);
 	expect(direct.result.ok).toBe(true);
 	expect(direct.questions).toEqual([]);
-	const existing = await syntheticReview(demoScope, undefined, { tool: "compareTransactionInsights" });
+	const existing = await syntheticReview(demoScope, undefined, { tool: "insights.compare" });
 	expect(existing.result.ok).toBe(true);
 	expect(direct.result.value.report).toEqual(existing.result.value);
 	for (const input of [

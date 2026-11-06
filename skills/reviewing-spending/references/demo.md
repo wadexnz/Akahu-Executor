@@ -19,7 +19,7 @@ It does not verify a hosted MCP client's form rendering or pause/resume transpor
 
 > Review my spending. Ask me which accounts and periods to compare.
 
-The agent discovers `reviewSpending` and calls it with `{}`. The tool offers
+The agent discovers `insights.reviewSpending` and calls it with `{}`. The tool offers
 Everyday and Reserve, the two eligible NZD accounts. USD, unknown-currency and
 no-feed accounts are not offered. The demo's scripted user selects both and enters:
 
