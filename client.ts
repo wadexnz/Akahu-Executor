@@ -1,70 +1,9 @@
-import { array, bearer, decodeJson, defineProvider, header, json, number, object, record, secrets, string, type Infer, type Schema } from "apps";
-
-// Akahu Personal App credentials. Executor stores them; app code only ever holds
-// handles, which Executor's network swaps for the real values on requests to
-// api.akahu.io, and only as these two exact headers.
-export const akahu = defineProvider({
-	name: "Akahu Personal App",
-	hosts: ["api.akahu.io"],
-	auth: {
-		personalApp: secrets({
-			label: "Akahu Personal App tokens",
-			fields: object({ "App ID Token": string({ minLength: 1 }), "User Access Token": string({ minLength: 1 }) }),
-			request: ({ "App ID Token": appToken, "User Access Token": userToken }) => [header("x-akahu-id", appToken), bearer(userToken)],
-		}),
-	},
-	async health({ account, fetch, signal }) {
-		const response = await fetch(`${API}/me`, { signal, headers: account.headers() });
-		const { item } = await decodeJson(response, object({ item: User }));
-		const accountInfo = { externalId: item._id };
-		if (item.email) return { accountInfo: { ...accountInfo, email: item.email } };
-		return { accountInfo };
-	},
-});
-
-export const API = "https://api.akahu.io/v1";
+import { array, decodeJson, json, object, string, type Schema } from "apps";
+import { API } from "./provider.js";
+import { Transaction } from "./schemas.js";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 export type Akahu = { fetch: Fetch; headers: Record<string, string>; signal: AbortSignal };
-
-// Decode only fields the tools consume; Akahu may add other response fields.
-const TransactionFields = {
-	_account: string(),
-	date: string(),
-	description: string(),
-	amount: number(),
-	type: string(),
-	balance: number().optional(),
-	merchant: object({ name: string(), website: string().optional() }).optional(),
-	category: object({ name: string(), groups: record(object({ name: string() })).optional() }).optional(),
-	meta: object({
-		particulars: string().optional(),
-		code: string().optional(),
-		reference: string().optional(),
-		other_account: string().optional(),
-		card_suffix: string().optional(),
-		conversion: object({ amount: number(), currency: string(), rate: number() }).optional(),
-	}).optional(),
-};
-export const Transaction = object({ _id: string(), ...TransactionFields });
-export type Transaction = Infer<typeof Transaction>;
-export const PendingTransaction = object({ ...TransactionFields, updated_at: string().optional() });
-export type PendingTransaction = Infer<typeof PendingTransaction>;
-export const Account = object({
-	_id: string(),
-	name: string(),
-	status: string(),
-	type: string(),
-	attributes: array(string()),
-	formatted_account: string().optional(),
-	refreshed: record(string()).optional(),
-	connection: object({ name: string() }),
-	balance: object({ currency: string(), current: number(), available: number().optional() }).optional(),
-});
-export type Account = Infer<typeof Account>;
-export const User = object({
-	_id: string(), email: string().optional(), preferred_name: string().optional(), access_granted_at: string().optional(),
-});
 
 function url(path: string, query: Record<string, string | undefined> = {}) {
 	const u = new URL(`${API}${path}`);

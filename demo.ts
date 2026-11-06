@@ -3,8 +3,8 @@ import type { ElicitationResponse } from "apps";
 import { FormElicitation, type HostRequest } from "apps/contracts";
 import { wrap } from "apps/effect";
 import app from "./index.js";
-import type { Account } from "./akahu.js";
-import type { compareInsights } from "./insights.js";
+import type { Account } from "./schemas.js";
+import type { compareInsights } from "./compare.js";
 
 // Runs the real tool through Executor's host boundary, with no network or real credentials.
 // Also used by the regression tests; run sequentially because fetch is process-global.

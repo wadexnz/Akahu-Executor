@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { Account, Transaction, PendingTransaction, User, fetchTransactions, getItem, getItems } from "./akahu.js";
-import { compareInsights } from "./insights.js";
+import { fetchTransactions, getItem, getItems } from "./client.js";
+import { Account, Transaction, PendingTransaction, User } from "./schemas.js";
+import { compareInsights } from "./compare.js";
 
 // Synthetic Akahu HTTP API; anything unexpected fails the request.
 const row = (id: string, amount: number, date: string, enriched = true, account = "acc_good"): Transaction => {

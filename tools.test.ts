@@ -2,7 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { createAppHandler, hostContext } from "apps/host";
 import type { HostRequest } from "apps/contracts";
 import app from "./index.js";
-import type { Account } from "./akahu.js";
+import type { Account } from "./schemas.js";
 import { demoAnswer, demoScope, syntheticReview } from "./demo.js";
 
 test("transaction tools keep currencies separate through the public host boundary", async () => {

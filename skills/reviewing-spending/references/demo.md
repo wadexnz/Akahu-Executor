@@ -4,7 +4,7 @@ This is a synthetic, reproducible worked example, not a real customer's data or
 a recording of a model conversation. The final explanation below is authored;
 the tool result is produced by the real app through Executor's local host handler.
 
-From `executor/akahu/`, after installing dependencies:
+From the repository root, after installing dependencies:
 
 ```sh
 bun run demo

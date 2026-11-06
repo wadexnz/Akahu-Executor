@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types bun index.ts *.test.ts",
+    "typecheck": "npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types bun index.ts demo.ts *.test.ts",
     "test": "bun test",
     "demo": "bun demo.ts",
     "deploy": "executor apps deploy --host https://api.executor.sh --files ."

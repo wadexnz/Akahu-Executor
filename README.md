@@ -126,6 +126,17 @@ failed account is excluded from both periods, and an unusual debit turns out to
 be a transfer. The automated tests exercise the same fixture. This is not a live
 MCP session or proof that a particular client renders the form correctly.
 
+## Layout
+
+| File | Contents |
+| --- | --- |
+| `index.ts` | `defineApp`: requirements and the root router |
+| `provider.ts` | The `Akahu Personal App` provider and its health check |
+| `client.ts` | HTTP helpers and transaction paging |
+| `schemas.ts` | Akahu response decoders and agent-facing output shapes |
+| `compare.ts` | Pure period-comparison logic |
+| `tools/*.ts` | One router per group (`accounts`, `transactions`, `insights`, `identity`, `admin`) |
+
 ## Develop and deploy
 
 ```sh
