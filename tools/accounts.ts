@@ -1,7 +1,7 @@
 import { array, number, object, query, router, string } from "apps";
 import { fetchAccounts, getItem } from "../client.js";
 import { Account, AccountOut, Empty } from "../schemas.js";
-import { client, READ, type Ctx } from "./context.js";
+import { client, READ, round, type Ctx } from "./context.js";
 
 function accountOut(a: Account) {
 	return {
@@ -44,6 +44,43 @@ const getAccount = query(
 		annotations: READ,
 	},
 	async (ctx: Ctx, { account_id }) => accountOut(await getItem(client(ctx), `/accounts/${encodeURIComponent(account_id)}`, Account)),
+);
+
+const CASH_TYPES = new Set(["CHECKING", "SAVINGS", "WALLET", "FOREIGN"]);
+
+const netWorth = query(
+	{
+		title: "Net worth: cash, other assets and debt",
+		description: "The mobile app's balance overview, per currency (never converted): cash (positive current balances of everyday, savings, wallet and foreign-currency accounts), other assets (positive balances of KiwiSaver, investment, term deposit and other accounts), debt (money owed on accounts with a negative current balance, shown positive) and net (assets minus debt). Available credit is not cash. Accounts without a balance are listed in excluded_account_ids.",
+		input: Empty,
+		output: object({
+			currencies: array(object({ currency: string(), cash: number(), other_assets: number(), debt: number(), net: number(), account_count: number() })),
+			excluded_account_ids: array(string()),
+		}),
+		annotations: READ,
+	},
+	async (ctx: Ctx) => {
+		const totals = new Map<string, { cash: number; other_assets: number; debt: number; account_count: number }>();
+		const excluded_account_ids: string[] = [];
+		for (const a of await fetchAccounts(client(ctx))) {
+			if (!a.balance || !Number.isFinite(a.balance.current)) {
+				excluded_account_ids.push(a._id);
+				continue;
+			}
+			const t = totals.get(a.balance.currency) ?? { cash: 0, other_assets: 0, debt: 0, account_count: 0 };
+			t.account_count++;
+			if (a.balance.current < 0) t.debt -= a.balance.current;
+			else if (CASH_TYPES.has(a.type)) t.cash += a.balance.current;
+			else t.other_assets += a.balance.current;
+			totals.set(a.balance.currency, t);
+		}
+		return {
+			currencies: [...totals].sort(([a], [b]) => a.localeCompare(b)).map(([currency, t]) => ({
+				currency, cash: round(t.cash), other_assets: round(t.other_assets), debt: round(t.debt), net: round(t.cash + t.other_assets - t.debt), account_count: t.account_count,
+			})),
+			excluded_account_ids,
+		};
+	},
 );
 
 // Akahu syncs Personal App data daily; older than this suggests a sync problem.
@@ -98,7 +135,7 @@ const accountFreshness = query(
 	},
 );
 
-export const accounts = router({ list: listAccounts, get: getAccount, freshness: accountFreshness }, {
+export const accounts = router({ list: listAccounts, get: getAccount, freshness: accountFreshness, netWorth }, {
 	title: "Accounts",
 	description: "Connected bank accounts, balances and feed status.",
 	instructions: "Balances are in each account's own currency; a negative balance is money owed (credit cards, loans). refreshed shows when Akahu last synced each part of the account, usually daily; accounts.freshness turns that into ages and warnings. An INACTIVE account can no longer sync but keeps its cached history. accounts.list and accounts.freshness may be up to 5 minutes old; accounts.get is live. connection_type official means the bank's official open banking API, which supplies less detail (for example no loan details, and dates without times).",

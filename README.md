@@ -23,10 +23,12 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `accounts.list` | Connected accounts and balances (cached 5 min) | |
 | `accounts.get` | One account, live | |
 | `accounts.freshness` | Sync ages per account, with warnings for INACTIVE, never-synced or stale data | |
+| `accounts.netWorth` | The mobile app's balance overview: cash, other assets, debt and net per currency | |
 | `transactions.search`, `transactions.get` | Settled transactions, with your notes and tags; search can filter by tag | |
 | `transactions.getMany` | Up to 100 transactions by id, reporting ids Akahu no longer has | |
 | `transactions.pending` | Pending transactions, for all accounts or one | |
 | `transactions.summary` | Totals by category, personal-finance group, merchant or type | |
+| `transactions.exportCsv` | The mobile app's CSV export, with search's filters, flows, tags and notes | |
 | `categories.list` | The bundled NZFCC categories and groups | |
 | `insights.compare` | Compare two periods (see below) | |
 | `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report | |
@@ -35,6 +37,10 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `insights.merchantHistory` | Everything paid to or received from one merchant, by month | |
 | `insights.largeOrUnusual` | Large debits to a new payee, or at least 3 times a payee's usual amount | |
 | `insights.budgetStatus` | Spending against your monthly budgets for one month | |
+| `insights.investmentContributions` | Paid in, withdrawn and net per saving provider outside your accounts (mobile's virtual accounts) | |
+| `review.cases` | The mobile app's review inbox: flows that rest on a guess, and your decisions | |
+| `review.decide` | Set a transaction's flow yourself, ahead of every rule; its result undoes it | |
+| `review.previewRule` | What a rule would change before `memory.addRule` saves it | |
 | `memory.setNote`, `memory.tag`, `memory.untag`, `memory.listTags` | Private notes and tags on transactions | |
 | `memory.addRule`, `memory.listRules`, `memory.removeRule` | Rules that set a transaction's flow, or leave it out of insights | |
 | `memory.setBudget`, `memory.listBudgets` | Monthly budgets per personal-finance group | |
@@ -184,6 +190,9 @@ Thread mobile app (`classify.ts`, ported from its `classifyTransaction`), so the
 agent, the dashboard and the phone agree on what counts as spending. First match
 wins:
 
+0. Your own decision on that transaction (`review.decide`). It follows the
+   transaction when its bank moves to official open banking and Akahu gives it
+   a new id; `automatic` drops it, even one carried over that way.
 1. Your first matching rule (`memory.addRule`): spending, income, transfer,
    saving, or `exclude` (left out of every insight; mobile has no exclude).
 2. Account type: KiwiSaver, investment and term deposit are saving; loans are
@@ -200,6 +209,15 @@ wins:
 Flows are worked out across all your accounts before any account filter, so a
 transfer to an account outside the view stays a transfer. `transactions.search`,
 `get` and `getMany` show each row's `flow`; `search` and `summary` filter by it.
+
+`review.cases` lists the flows that rest on a guess, as the mobile app's review
+inbox does: a transfer pair matched by amount and day only (one case with both
+sides), a credit matched to a saving provider by name only (with the payment as
+evidence), and the broad financial-services category. Decide both sides of a
+pair together with `paired_id`. `review.decide` returns each transaction's
+previous state; passing it back undoes the change exactly. `review.previewRule`
+shows how many transactions a rule would match and change, and how many keep
+their flow because you decided them or an earlier rule wins.
 
 ## Insights
 
@@ -287,11 +305,11 @@ After deploying, `tools.executor.appUi.location` returns the page's URL.
 | `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
 | `schemas.ts` | Akahu response decoders and output shapes shared by the tools and the dashboard |
 | `compare.ts` | Pure period-comparison logic |
-| `classify.ts` | Transaction flows, ported from the mobile app, and rule matching |
+| `classify.ts` | Transaction flows, review cases and investment contributions, ported from the mobile app |
 | `analysis.ts` | Pure NZ-date, recurring and unusual-debit logic |
-| `migrations/` | The app database schema for memory, balance snapshots and alerts |
+| `migrations/` | The app database schema for memory, balance snapshots, alerts and review decisions |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
-| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `monitor`, `identity`, `admin`) |
+| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `review`, `memory`, `monitor`, `identity`, `admin`) |
 | `ui/` | The monthly review dashboard; imports tool types only, plus `schemas.ts` |
 | `test-database.ts` | An in-memory SQLite app database for tests, with the real migrations |
 

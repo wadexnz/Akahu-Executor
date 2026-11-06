@@ -5,7 +5,7 @@ import {
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { compareInsights } from "../compare.js";
 import { BudgetStatusOut, CashflowOut, CompareInput, CompareOut, Currencies, Interval, RecurringOut, RulesApplied } from "../schemas.js";
-import { rulesApplied, type Classified } from "../classify.js";
+import { investmentContributions as contributions, rulesApplied, type Classified } from "../classify.js";
 import { client, flowsFor, READ, type Ctx } from "./context.js";
 import { loadBudgets, owner } from "./memory.js";
 
@@ -293,8 +293,41 @@ export const budgetStatus = query(
 	},
 );
 
+const investmentContributions = query(
+	{
+		title: "Investment contributions",
+		description: "The mobile app's investment contributions (virtual accounts) between start and end (default the last 24 months, about all Akahu keeps): every saving provider the user pays outside their connected accounts (a merchant on a saving-flow payment, such as an investment or savings app), per currency, with what was paid in, withdrawn (credits matched by the provider's name) and net contributed, the last activity, and evidence ids (newest first, up to 20). Not a balance: growth and fees at the provider are not seen. Decisions that a row is not saving are respected.",
+		input: object({ start: string().optional(), end: string().optional() }),
+		output: object({
+			period: Interval,
+			providers: array(object({
+				provider: string(), aliases: array(string()), currency: string(), paid_in: number(), withdrawn: number(), net_contributed: number(),
+				transaction_count: number(), last_activity: string(), evidence_ids: array(string()),
+			})),
+			rules_applied: RulesApplied,
+			unknown_currency_transaction_ids: Currencies,
+		}),
+		annotations: READ,
+	},
+	async (ctx: Ctx, i) => {
+		const now = Date.now();
+		const period = { start: i.start ?? monthsBack(now, 24), end: i.end ?? new Date(now).toISOString() };
+		instant(period.start, "start");
+		instant(period.end, "end");
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period);
+		return {
+			period,
+			providers: contributions(rows).map(({ transactions, paid_in, withdrawn, net_contributed, ...p }) => ({
+				...p, paid_in: round(paid_in), withdrawn: round(withdrawn), net_contributed: round(net_contributed),
+				transaction_count: transactions.length, last_activity: nzDay(transactions[0]!.date), evidence_ids: transactions.slice(0, 20).map((t) => t._id),
+			})),
+			rules_applied, unknown_currency_transaction_ids,
+		};
+	},
+);
+
 export const insights = router(
-	{ compare: compareTransactionInsights, reviewSpending, recurring, cashflow, merchantHistory, largeOrUnusual, budgetStatus },
+	{ compare: compareTransactionInsights, reviewSpending, recurring, cashflow, merchantHistory, largeOrUnusual, budgetStatus, investmentContributions },
 	{
 		title: "Insights",
 		description: "Evidence-backed views of settled transactions: period comparisons, recurring payments, monthly cash flow, merchant history, unusual debits and budgets.",

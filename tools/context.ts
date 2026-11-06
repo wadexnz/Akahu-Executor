@@ -2,7 +2,7 @@ import { event, object, string, type MutationContext, type QueryContext } from "
 import { priced } from "../analysis.js";
 import { classify, type Classified } from "../classify.js";
 import type { Akahu } from "../client.js";
-import { loadRules, owner } from "./memory.js";
+import { loadDecisions, loadRules, owner } from "./memory.js";
 import { akahu } from "../provider.js";
 import type { Account, PendingTransaction, Transaction } from "../schemas.js";
 
@@ -47,10 +47,10 @@ export function txn(t: Transaction | PendingTransaction) {
 
 export { round } from "../analysis.js";
 
-// Each settled row's flow, worked out across every row given (pass all accounts' rows so a
+// Each settled row's flow (the user's decisions, then rules, then automatic), worked out across every row given (pass all accounts' rows so a
 // transfer keeps its other side). Rows whose account currency is unknown get none.
 export function flowsFor(ctx: Ctx, rows: readonly Transaction[], accounts: readonly Account[]): Map<string, Classified> {
-	return new Map(classify(priced(rows, accounts).rows, accounts, loadRules(ctx.sql, owner(ctx))).map((t) => [t._id, t]));
+	return new Map(classify(priced(rows, accounts).rows, accounts, loadRules(ctx.sql, owner(ctx)), loadDecisions(ctx.sql, owner(ctx))).map((t) => [t._id, t]));
 }
 
 // Account currency is the unit of the settled amount, not the original FX purchase.

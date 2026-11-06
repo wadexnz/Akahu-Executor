@@ -16,7 +16,7 @@ const caller = (id: string) => ({ akahu: {
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; setSystemTime(); });
 
-type Txn = { _id: string; _account: string; date: string; description: string; amount: number; type: string; category?: object; merchant?: { name: string } };
+type Txn = { _id: string; _migrated?: string; _account: string; date: string; description: string; amount: number; type: string; category?: object; merchant?: { name: string } };
 const accounts = ["acc_everyday", "acc_savings", "acc_usd"].map((id) => ({
 	_id: id, name: id, status: "ACTIVE", type: "CHECKING", attributes: ["TRANSACTIONS"], connection: { name: "Synthetic Bank" },
 	balance: { currency: id === "acc_usd" ? "USD" : "NZD", current: 0 },
@@ -191,4 +191,78 @@ test("recurring, merchant history and unusual debits read the caller's history t
 	const unusual = await alice("insights.largeOrUnusual", {});
 	expect(unusual.debits.map((d: { id: string; reason: string }) => [d.id, d.reason])).toEqual([["trans_dentist", "first_payment_to_payee"]]);
 	await expect(alice("insights.recurring", { months: 1 })).rejects.toThrow("months must be a whole number");
+});
+
+test("review: guessed pairs are cases, decisions win and undo exactly, and rule previews save nothing", async () => {
+	setSystemTime(new Date("2026-11-10T00:00:00Z"));
+	akahu([
+		tx("trans_out", "acc_everyday", "2026-10-20T00:00:00Z", -500, { description: "TO SAVINGS" }),
+		tx("trans_in", "acc_savings", "2026-10-20T03:00:00Z", 500, { description: "FROM EVERYDAY" }),
+		tx("trans_gym", "acc_everyday", "2026-10-21T00:00:00Z", -60, { description: "=HYPERLINK(\"x\") GYM, MONTHLY" }),
+		tx("trans_gym2", "acc_everyday", "2026-09-21T00:00:00Z", -60, { description: "GYM MONTHLY" }),
+		// Official open banking re-issued this transaction with a new id.
+		tx("trans_new", "acc_everyday", "2026-10-22T00:00:00Z", -30, { description: "LUNCH", _migrated: "trans_old" }),
+	]);
+	const { as } = session();
+	const alice = as("acc_alice"), bob = as("acc_bob");
+	const flows = async (who: typeof alice) => Object.fromEntries((await who("transactions.search", {})).transactions.map((t: { id: string; flow: string }) => [t.id, t.flow]));
+
+	const inbox = await alice("review.cases", {});
+	expect(inbox.cases.map((k: { reason: string; transactions: { id: string }[] }) => [k.reason, k.transactions.map((t) => t.id)])).toEqual([["transfer", ["trans_out", "trans_in"]]]);
+
+	// The pair was not a transfer: the user calls it saving on both sides.
+	const first = await alice("review.decide", { decisions: [
+		{ transaction_id: "trans_out", flow: "saving", paired_id: "trans_in" }, { transaction_id: "trans_in", flow: "saving", paired_id: "trans_out" },
+		{ transaction_id: "trans_old", flow: "income" },
+	] });
+	expect(first.previous).toEqual([{ transaction_id: "trans_out", flow: "unset" }, { transaction_id: "trans_in", flow: "unset" }, { transaction_id: "trans_old", flow: "unset" }]);
+	expect(await flows(alice)).toMatchObject({ trans_out: "saving", trans_in: "saving", trans_new: "income" });
+	expect(await flows(bob)).toMatchObject({ trans_out: "transfer", trans_in: "transfer", trans_new: "spending" });
+	const reviewed = await alice("review.cases", { include_reviewed: true });
+	expect(reviewed.cases.map((k: { reason: string; transactions: { id: string }[] }) => [k.reason, k.transactions.map((t) => t.id)])).toEqual([["reviewed", ["trans_new"]], ["reviewed", ["trans_out", "trans_in"]]]);
+	expect(reviewed.decision_count).toBe(3);
+	expect((await alice("review.cases", {})).cases).toEqual([]);
+
+	// automatic on the new id masks the decision carried over from the classic one; undo restores it.
+	const second = await alice("review.decide", { decisions: [{ transaction_id: "trans_new", flow: "automatic" }, { transaction_id: "trans_out", flow: "spending" }] });
+	expect(second.previous).toEqual([{ transaction_id: "trans_new", flow: "unset" }, { transaction_id: "trans_out", flow: "saving", paired_id: "trans_in" }]);
+	expect(await flows(alice)).toMatchObject({ trans_new: "spending", trans_out: "spending" });
+	await alice("review.decide", { decisions: second.previous });
+	expect(await flows(alice)).toMatchObject({ trans_new: "income", trans_out: "saving" });
+	await expect(alice("review.decide", { decisions: [{ transaction_id: "trans_out", flow: "transfers" }] })).rejects.toThrow("flow must be one of");
+	await expect(alice("review.decide", { decisions: [{ transaction_id: "trans_a", flow: "saving" }, { transaction_id: "trans_a", flow: "income" }] })).rejects.toThrow("appear once");
+
+	// A preview counts what would change, respects decisions, and saves nothing.
+	const preview = await alice("review.previewRule", { kind: "transfer", match: { description: "gym" } });
+	expect(preview).toMatchObject({ matches: 2, would_change: 2, kept_by_decision: 0, kept_by_earlier_rule: 0, changes: [{ from: "spending", to: "transfer", count: 2 }] });
+	expect(preview.examples.map((e: { id: string }) => e.id)).toEqual(["trans_gym", "trans_gym2"]);
+	expect((await alice("review.previewRule", { kind: "spending", match: { description: "savings" } }))).toMatchObject({ matches: 1, would_change: 0, kept_by_decision: 1 });
+	await expect(alice("review.previewRule", { kind: "transfer", match: {} })).rejects.toThrow("at least one of");
+	expect(await alice("memory.listRules")).toEqual([]);
+
+	// CSV export: flows, quoting, and spreadsheet formulas in bank text neutralised.
+	const csv = await alice("transactions.exportCsv", { description: "gym" });
+	expect(csv).toMatchObject({ rows: 2, truncated: false, filename: "akahu-transactions-2026-09-21-to-2026-10-21.csv" });
+	expect(csv.csv.split("\n")[1]).toBe('trans_gym,2026-10-21,Synthetic Bank,acc_everyday,"\'=HYPERLINK(""x"") GYM, MONTHLY",,Uncategorised,spending,NZD,-60,,');
+	await expect(alice("transactions.exportCsv", { limit: 10001 })).rejects.toThrow("limit must be");
+});
+
+test("net worth separates cash, other assets and debt per currency without counting available credit", async () => {
+	const saved = accounts.map((a) => ({ ...a }));
+	Object.assign(accounts[0]!, { balance: { currency: "NZD", current: 1200.5, available: 5000 } });
+	Object.assign(accounts[1]!, { type: "KIWISAVER", balance: { currency: "NZD", current: 30000 } });
+	Object.assign(accounts[2]!, { type: "CREDITCARD", balance: { currency: "USD", current: -250, available: 750 } });
+	accounts.push({ ...saved[0]!, _id: "acc_new", balance: undefined as never });
+	try {
+		akahu([]);
+		expect(await session().as("acc_alice")("accounts.netWorth")).toEqual({
+			currencies: [
+				{ currency: "NZD", cash: 1200.5, other_assets: 30000, debt: 0, net: 31200.5, account_count: 2 },
+				{ currency: "USD", cash: 0, other_assets: 0, debt: 250, net: -250, account_count: 1 },
+			],
+			excluded_account_ids: ["acc_new"],
+		});
+	} finally {
+		accounts.splice(0, accounts.length, ...saved);
+	}
 });

@@ -1,4 +1,4 @@
-import { array, boolean, number, object, query, router, string } from "apps";
+import { array, boolean, number, object, query, router, string, type Infer } from "apps";
 import { groupOf, nzStartOf, nzDay } from "../analysis.js";
 import { FLOWS, type Classified } from "../classify.js";
 import { resolveGroup } from "../categories.js";
@@ -34,24 +34,55 @@ function flowFilter(flow: string | undefined) {
 	return flow;
 }
 
+const Filters = {
+	start: string().optional(),
+	end: string().optional(),
+	account_id: string().optional(),
+	type: string().optional(),
+	category: string().optional(),
+	merchant: string().optional(),
+	description: string().optional(),
+	group: string().optional(),
+	tag: string().optional(),
+	min_amount: number().optional(),
+	max_amount: number().optional(),
+	flow: string().optional(),
+};
+
+const FilterInput = object(Filters);
+
+// Settled rows matching search's filters, newest first, with every row's flow.
+async function filtered(ctx: Ctx, i: Infer<typeof FilterInput>) {
+	const group = resolveGroup(i.group);
+	const tagged = i.tag === undefined ? undefined : taggedIds(ctx.sql, owner(ctx), i.tag);
+	const flow = flowFilter(i.flow);
+	const has = (value: string | undefined, needle: string | undefined) =>
+		needle === undefined || (value ?? "").toLowerCase().includes(needle.toLowerCase());
+	const c = client(ctx), accounts = await fetchAccounts(c);
+	// Every account's rows in the range, so a transfer's other side is seen.
+	const all = await fetchTransactions(c, { start: i.start, end: i.end });
+	const flows = flowsFor(ctx, all, accounts);
+	const rows = all.filter((t) =>
+		(i.account_id === undefined || t._account === i.account_id) &&
+		(flow === undefined || flows.get(t._id)?.flow === flow) &&
+		(i.type === undefined || t.type === i.type.toUpperCase()) &&
+		(i.category === undefined || (t.category !== undefined && has(t.category.name, i.category))) &&
+		(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
+		has(t.description, i.description) &&
+		(group === undefined || groupOf(t) === group) &&
+		(tagged === undefined || tagged.has(t._id)) &&
+		(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
+		(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount));
+	return { rows, flows, accounts };
+}
+
 const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
 			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Each row has its flow, as in the mobile app: spending, income, transfer (between the user's own accounts), saving (KiwiSaver, investments, savings providers) or excluded (by the user's rule); flow filters by it. Flows are worked out across every account within start/end, so give a range when you can. Rows carry the user's note and tags when they have any.",
 		input: object({
-			start: string().optional(),
-			end: string().optional(),
-			account_id: string().optional(),
-			type: string().optional(),
-			category: string().optional(),
-			merchant: string().optional(),
-			description: string().optional(),
-			group: string().optional(),
-			tag: string().optional(),
-			min_amount: number().optional(),
-			max_amount: number().optional(),
-			flow: string().optional(),
+			...Filters,
 			limit: number().default(500),
 		}),
 		output: object({
@@ -63,26 +94,7 @@ const getTransactions = query(
 	},
 	async (ctx: Ctx, i) => {
 		if (!Number.isInteger(i.limit) || i.limit < 1) throw new Error("limit must be a positive integer");
-		const group = resolveGroup(i.group);
-		const tagged = i.tag === undefined ? undefined : taggedIds(ctx.sql, owner(ctx), i.tag);
-		const flow = flowFilter(i.flow);
-		const has = (value: string | undefined, needle: string | undefined) =>
-			needle === undefined || (value ?? "").toLowerCase().includes(needle.toLowerCase());
-		const c = client(ctx), accounts = await fetchAccounts(c);
-		// Every account's rows in the range, so a transfer's other side is seen.
-		const all = await fetchTransactions(c, { start: i.start, end: i.end });
-		const flows = flowsFor(ctx, all, accounts);
-		const rows = all.filter((t) =>
-					(i.account_id === undefined || t._account === i.account_id) &&
-					(flow === undefined || flows.get(t._id)?.flow === flow) &&
-					(i.type === undefined || t.type === i.type.toUpperCase()) &&
-					(i.category === undefined || (t.category !== undefined && has(t.category.name, i.category))) &&
-					(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
-					has(t.description, i.description) &&
-					(group === undefined || groupOf(t) === group) &&
-					(tagged === undefined || tagged.has(t._id)) &&
-					(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
-					(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount));
+		const { rows, flows, accounts } = await filtered(ctx, i);
 		const shown = rows.slice(0, i.limit);
 		const { groups, unknown_currency_transaction_ids } = groupCurrencies(shown, accounts);
 		return {
@@ -211,8 +223,42 @@ const getTransactionSummary = query(
 	},
 );
 
+const MAX_CSV_ROWS = 10000;
+// Neutralise spreadsheet formulas in third-party bank text (as the mobile app's export does).
+const cell = (value: string) => {
+	const s = /^\s*[=+@-]/.test(value) ? `'${value}` : value;
+	return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+const exportCsv = query(
+	{
+		title: "Export transactions as CSV",
+		description: `Settled transactions as CSV text, with the same filters as transactions.search (the mobile app's export): ID, NZ date, bank, account, description, merchant, category, flow, currency, amount, tags and note, newest first. limit defaults to 2000 rows, at most ${MAX_CSV_ROWS}; truncated says whether rows were left out. Amounts are in each account's own currency and are never converted. Give the user the csv as a file; do not paste a long one into the chat.`,
+		input: object({ ...Filters, limit: number().default(2000) }),
+		output: object({ filename: string(), rows: number(), truncated: boolean(), csv: string() }),
+		annotations: READ,
+	},
+	async (ctx: Ctx, i) => {
+		if (!Number.isInteger(i.limit) || i.limit < 1 || i.limit > MAX_CSV_ROWS) throw new Error(`limit must be a whole number from 1 to ${MAX_CSV_ROWS}`);
+		const { rows, flows, accounts } = await filtered(ctx, i);
+		const shown = rows.slice(0, i.limit), byId = new Map(accounts.map((a) => [a._id, a]));
+		const memo = annotationsFor(ctx.sql, owner(ctx), shown.map((t) => t._id));
+		const lines = [["ID", "NZ date", "Bank", "Account", "Description", "Merchant", "Category", "Flow", "Currency", "Amount", "Tags", "Note"].join(",")];
+		for (const t of shown) {
+			const a = byId.get(t._account), m = memo.get(t._id);
+			const text = [t._id, nzDay(t.date), a?.connection.name ?? "Unknown", a ? (a.formatted_account ? `${a.name} ${a.formatted_account}` : a.name) : t._account, t.description, t.merchant?.name ?? "", t.category?.name ?? "Uncategorised", flows.get(t._id)?.flow ?? "", a?.balance?.currency ?? ""].map(cell);
+			lines.push([...text, String(t.amount), cell(m?.tags.join("; ") ?? ""), cell(m?.note ?? "")].join(","));
+		}
+		const days = shown.map((t) => nzDay(t.date)).sort();
+		return {
+			filename: days.length ? `akahu-transactions-${days[0]}-to-${days.at(-1)}.csv` : "akahu-transactions.csv",
+			rows: shown.length, truncated: rows.length > i.limit, csv: `${lines.join("\n")}\n`,
+		};
+	},
+);
+
 export const transactions = router(
-	{ search: getTransactions, get: getTransaction, getMany: getManyTransactions, pending: getPendingTransactions, summary: getTransactionSummary },
+	{ search: getTransactions, exportCsv, get: getTransaction, getMany: getManyTransactions, pending: getPendingTransactions, summary: getTransactionSummary },
 	{
 		title: "Transactions",
 		description: "Settled and pending transactions, filtered lists and grouped totals.",

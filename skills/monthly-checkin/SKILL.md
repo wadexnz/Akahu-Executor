@@ -24,7 +24,9 @@ A short, evidence-backed review of one NZ calendar month and the month before it
    payments with their ids.
 6. Optionally `insights.recurring` to mention renewals due before the month ends
    (`next_expected`).
-7. `monitor.alerts` for alerts the user has not seen yet, and
+7. `review.cases` for the month: if any flows rest on a guess, say how many,
+   since they change spending, and offer to go through them.
+8. `monitor.alerts` for alerts the user has not seen yet, and
    `monitor.balanceHistory` to show how balances moved over the month (history
    starts when the daily check first ran).
 
@@ -44,5 +46,6 @@ A short, evidence-backed review of one NZ calendar month and the month before it
 
 ## Remember
 
-Offer, never assume: tagging a payment (`memory.tag`), a note (`memory.setNote`), a
-rule that sets the right flow when one looks wrong (`memory.addRule`), or a budget change.
+Offer, never assume: tagging a payment (`memory.tag`), a note (`memory.setNote`), the
+user's own flow for one payment that looks wrong (`review.decide`), a rule for a pattern
+(preview it with `review.previewRule`, then `memory.addRule`), or a budget change.

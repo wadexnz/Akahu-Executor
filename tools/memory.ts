@@ -1,5 +1,5 @@
 import { array, boolean, mutation, number, object, query, router, string, type SqlReader } from "apps";
-import { RULE_KINDS, type Rule, type RuleMatch } from "../classify.js";
+import { RULE_KINDS, type Decision, type Flow, type Rule, type RuleMatch } from "../classify.js";
 import { resolveGroup } from "../categories.js";
 import { Budget } from "../schemas.js";
 import type { Ctx, WriteCtx } from "./context.js";
@@ -51,13 +51,36 @@ export function loadRules(sql: SqlReader, who: string): Rule[] {
 	).toArray().map((r) => ({ id: r.id, kind: r.kind, match: JSON.parse(r.match) as RuleMatch, ...(r.reason !== null && { reason: r.reason }) }));
 }
 
+export function loadDecisions(sql: SqlReader, who: string): Map<string, Decision> {
+	return new Map(sql.exec<{ transaction_id: string; flow: string | null; paired_id: string | null }>(
+		"SELECT transaction_id, flow, paired_id FROM decisions WHERE owner = ?", who,
+	).toArray().map((r) => [r.transaction_id, r.flow === null ? null : { flow: r.flow as Flow, ...(r.paired_id !== null && { paired_id: r.paired_id }) }]));
+}
+
+// A rule as addRule would store it, or an error saying what is wrong (review.previewRule too).
+export function cleanRule(kind: string, match: RuleMatch): RuleMatch {
+	if (!RULE_KINDS.includes(kind)) throw new Error(`kind must be one of ${RULE_KINDS.join(", ")}`);
+	if (match.direction !== undefined && !["debit", "credit"].includes(match.direction)) throw new Error("match.direction must be debit or credit");
+	const clean: RuleMatch = {};
+	for (const field of MatchFields) {
+		const value = match[field]?.trim();
+		if (value === undefined || value === "") continue;
+		if (value.length > MAX_TEXT) throw new Error(`match.${field} must be at most ${MAX_TEXT} characters`);
+		clean[field] = value;
+	}
+	if (!clean.description && !clean.merchant && !clean.other_account && !clean.account_id) {
+		throw new Error("match needs at least one of description, merchant, other_account or account_id");
+	}
+	return clean;
+}
+
 export function loadBudgets(sql: SqlReader, who: string) {
 	return sql.exec<{ category_group: string; currency: string; monthly_amount: number }>(
 		"SELECT category_group, currency, monthly_amount FROM budgets WHERE owner = ? ORDER BY category_group, currency", who,
 	).toArray().map((b) => ({ group: b.category_group, currency: b.currency, monthly_amount: b.monthly_amount }));
 }
 
-const Match = object({ description: string().optional(), merchant: string().optional(), other_account: string().optional(), account_id: string().optional(), direction: string().optional() });
+export const Match = object({ description: string().optional(), merchant: string().optional(), other_account: string().optional(), account_id: string().optional(), direction: string().optional() });
 const RuleOut = object({ id: string(), kind: string(), match: Match, reason: string().optional() });
 const setNote = mutation(
 	{
@@ -133,24 +156,13 @@ const listTags = query(
 const addRule = mutation(
 	{
 		title: "Add an insights rule",
-		description: `Set the flow of matching transactions, ahead of the automatic classification (as the mobile app's classification rules do). kind spending, income, transfer or saving: for example transfer for a credit card repayment to a card Akahu does not see, saving for a savings app, income for a refund pattern; kind exclude: leave matches out of every insight (for example a one-off house deposit). match needs at least one of description, merchant, other_account (case-insensitive substrings; account numbers ignore dashes), account_id (exact) and optionally direction (debit or credit). The first matching rule wins. Rules decide the flow shown by transactions.search, get and getMany and used by summary's flow filter, insights.cashflow, recurring, largeOrUnusual, budgetStatus and monitor.check; the insights report how many rows each rule matched. Only add a rule the user asked for. At most ${MAX_RULES} rules.`,
+		description: `Set the flow of matching transactions, ahead of the automatic classification (as the mobile app's classification rules do). kind spending, income, transfer or saving: for example transfer for a credit card repayment to a card Akahu does not see, saving for a savings app, income for a refund pattern; kind exclude: leave matches out of every insight (for example a one-off house deposit). match needs at least one of description, merchant, other_account (case-insensitive substrings; account numbers ignore dashes), account_id (exact) and optionally direction (debit or credit). The first matching rule wins; the user's review decisions (review.decide) win over rules. Check a rule with review.previewRule first. Rules decide the flow shown by transactions.search, get and getMany and used by summary's flow filter, insights.cashflow, recurring, largeOrUnusual, budgetStatus and monitor.check; the insights report how many rows each rule matched. Only add a rule the user asked for. At most ${MAX_RULES} rules.`,
 		input: object({ kind: string(), match: Match, reason: string().optional() }),
 		output: RuleOut,
 		annotations: { ...LOCAL, idempotentHint: false },
 	},
 	async (ctx: WriteCtx, { kind, match, reason }) => {
-		if (!RULE_KINDS.includes(kind)) throw new Error(`kind must be one of ${RULE_KINDS.join(", ")}`);
-		if (match.direction !== undefined && !["debit", "credit"].includes(match.direction)) throw new Error("match.direction must be debit or credit");
-		const clean: RuleMatch = {};
-		for (const field of MatchFields) {
-			const value = match[field]?.trim();
-			if (value === undefined || value === "") continue;
-			if (value.length > MAX_TEXT) throw new Error(`match.${field} must be at most ${MAX_TEXT} characters`);
-			clean[field] = value;
-		}
-		if (!clean.description && !clean.merchant && !clean.other_account && !clean.account_id) {
-			throw new Error("match needs at least one of description, merchant, other_account or account_id");
-		}
+		const clean = cleanRule(kind, match);
 		const who = owner(ctx), id = `rule_${crypto.randomUUID()}`, note = reason?.trim().slice(0, MAX_TEXT) || undefined;
 		ctx.sql.transaction((tx) => {
 			if (tx.exec<{ n: number }>("SELECT COUNT(*) AS n FROM rules WHERE owner = ?", who).one().n >= MAX_RULES) throw new Error(`At most ${MAX_RULES} rules; remove one first`);

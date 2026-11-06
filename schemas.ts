@@ -19,7 +19,8 @@ const TransactionFields = {
 		conversion: object({ amount: number(), currency: string(), rate: number() }).optional(),
 	}).optional(),
 };
-export const Transaction = object({ _id: string(), ...TransactionFields });
+// _migrated: the classic transaction an official-open-banking one replaced (a new id).
+export const Transaction = object({ _id: string(), _migrated: string().optional(), ...TransactionFields });
 export type Transaction = Infer<typeof Transaction>;
 export const PendingTransaction = object({ ...TransactionFields, updated_at: string().optional() });
 export type PendingTransaction = Infer<typeof PendingTransaction>;
@@ -69,7 +70,7 @@ export const User = object({
 export const Empty = object({});
 export const Interval = object({ start: string(), end: string() });
 export const CompareInput = object({ account_ids: array(string()), baseline: Interval, comparison: Interval });
-export const Txn = object({
+const TxnFields = {
 	id: string().optional(),
 	pending: boolean().optional(),
 	account_id: string(),
@@ -90,7 +91,10 @@ export const Txn = object({
 	flow: string().optional(),
 	note: string().optional(),
 	tags: array(string()).optional(),
-});
+};
+export const Txn = object(TxnFields);
+// A settled row with the currency of its account (review cases).
+export const CaseTxn = object({ ...TxnFields, currency: string() });
 export const AccountOut = object({
 	id: string(),
 	bank: string(),

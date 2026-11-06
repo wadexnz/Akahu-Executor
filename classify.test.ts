@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Row } from "./analysis.js";
-import { classify, rulesApplied, type Rule } from "./classify.js";
+import { classify, investmentContributions, reviewCases, rulesApplied, type Decision, type Rule } from "./classify.js";
 import type { Account } from "./schemas.js";
 
 // Cases ported from the mobile app's classifyTransaction tests, plus what this app adds:
@@ -99,5 +99,51 @@ describe("rules", () => {
 		const credit = { ...hit, _id: "trans_credit", amount: 80 };
 		const otherAccount = { ...hit, _id: "trans_other", meta: { other_account: "99-0000" } };
 		expect(flowOf([hit, credit, otherAccount], rules)).toEqual(["transfer", "income", "spending"]);
+	});
+});
+
+describe("decisions", () => {
+	test("a decision wins over rules and every automatic step, follows migration, and null masks the classic decision", () => {
+		const ks = row("acc_ks", -100), classic = row("acc_checking", -40), official = row("acc_checking", -40, { _migrated: classic._id });
+		const masked = row("acc_checking", -60, { _migrated: "trans_classic_masked" });
+		const decisions = new Map<string, Decision>([[ks._id, { flow: "spending" }], [classic._id, { flow: "saving" }], ["trans_classic_masked", { flow: "income" }], [masked._id, null]]);
+		const rules: Rule[] = [{ id: "rule_all", kind: "transfer", match: { account_id: "acc_ks" } }];
+		const result = classify([ks, official, masked], accounts, rules, decisions);
+		expect(result.map((t) => [t.flow, t.review?.reason, t.rule_id])).toEqual([["spending", "reviewed", undefined], ["saving", "reviewed", undefined], ["spending", undefined, undefined]]);
+	});
+});
+
+describe("review cases", () => {
+	test("a guessed pair is one case with both sides, kept when only the other side is in scope", () => {
+		const out = row("acc_checking", -200), into = row("acc_savings", 200);
+		const rows = classify([out, into], accounts, []);
+		expect(reviewCases(rows, (t) => t._account === "acc_savings").map((k) => [k.reason, k.transactions.map((t) => t._id)])).toEqual([["transfer", [out._id, into._id]]]);
+		expect(reviewCases(rows, (t) => t._account === "acc_loan")).toEqual([]);
+	});
+
+	test("provider credits carry their payment as evidence; decided pairs stay together; certain flows are not cases", () => {
+		const pay = row("acc_checking", -300, { date: "2026-05-01T00:00:00.000Z", merchant: { _id: "merchant_acorn", name: "Acorn Investments" }, category: BROKERS });
+		const back = row("acc_checking", 120, { date: "2026-06-03T00:00:00.000Z", description: "Acorn withdrawal" });
+		const a = row("acc_checking", -75, { date: "2026-06-02T00:00:00.000Z" }), b = row("acc_savings", 75, { date: "2026-06-05T00:00:00.000Z" });
+		const plain = row("acc_checking", -9);
+		const decisions = new Map<string, Decision>([[a._id, { flow: "transfer", paired_id: b._id }], [b._id, { flow: "transfer", paired_id: a._id }]]);
+		const cases = reviewCases(classify([pay, back, a, b, plain], accounts, [], decisions), () => true);
+		expect(cases.map((k) => [k.reason, k.transactions.map((t) => t._id), k.evidence?._id])).toEqual([
+			["provider", [back._id], pay._id],
+			["reviewed", [a._id, b._id], undefined],
+		]);
+	});
+});
+
+test("investment contributions: paid in, withdrawn by name, and a row decided not saving is left out", () => {
+	const pay = row("acc_checking", -300, { merchant: { _id: "merchant_acorn", name: "Acorn Investments" }, category: BROKERS });
+	const pay2 = row("acc_checking", -200, { date: "2026-06-08T00:00:00.000Z", merchant: { _id: "merchant_acorn", name: "Acorn Investments" }, category: BROKERS });
+	const back = row("acc_checking", 50, { date: "2026-06-09T00:00:00.000Z", description: "ACORN payout" });
+	const refund = row("acc_checking", 20, { date: "2026-06-10T00:00:00.000Z", description: "Acorn refund" });
+	const decisions = new Map<string, Decision>([[refund._id, { flow: "income" }]]);
+	const [acorn, ...others] = investmentContributions(classify([pay, pay2, back, refund, row("acc_checking", -15)], accounts, [], decisions));
+	expect(others).toEqual([]);
+	expect({ ...acorn!, transactions: acorn!.transactions.map((t) => t._id) }).toEqual({
+		provider: "Acorn Investments", aliases: ["acorn", "investments"], currency: "NZD", paid_in: 500, withdrawn: 50, net_contributed: 450, transactions: [back._id, pay2._id, pay._id],
 	});
 });
