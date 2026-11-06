@@ -1,13 +1,14 @@
 import { array, boolean, number, object, query, router, string } from "apps";
-import { fetchTransactions, getItem, getItems, fetchAccounts } from "../client.js";
-import { Empty, PendingTransaction, Transaction, Txn } from "../schemas.js";
+import { resolveGroup } from "../categories.js";
+import { fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
+import { PendingTransaction, Transaction, Txn } from "../schemas.js";
 import { client, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
 
 const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
-			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable.",
+			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable.",
 		input: object({
 			start: string().optional(),
 			end: string().optional(),
@@ -16,6 +17,7 @@ const getTransactions = query(
 			category: string().optional(),
 			merchant: string().optional(),
 			description: string().optional(),
+			group: string().optional(),
 			min_amount: number().optional(),
 			max_amount: number().optional(),
 			limit: number().default(500),
@@ -29,6 +31,7 @@ const getTransactions = query(
 	},
 	async (ctx: Ctx, i) => {
 		if (!Number.isInteger(i.limit) || i.limit < 1) throw new Error("limit must be a positive integer");
+		const group = resolveGroup(i.group);
 		const has = (value: string | undefined, needle: string | undefined) =>
 			needle === undefined || (value ?? "").toLowerCase().includes(needle.toLowerCase());
 		const rows = await fetchTransactions(
@@ -42,6 +45,7 @@ const getTransactions = query(
 					(i.category === undefined || (t.category !== undefined && has(t.category.name, i.category))) &&
 					(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
 					has(t.description, i.description) &&
+					(group === undefined || groupOf(t) === group) &&
 					(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
 					(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount),
 			},
@@ -58,6 +62,8 @@ const getTransactions = query(
 	},
 );
 
+const groupOf = (t: Transaction) => t.category?.groups?.personal_finance?.name;
+
 const getTransaction = query(
 	{
 		title: "Get transaction",
@@ -73,24 +79,47 @@ const getTransaction = query(
 const getPendingTransactions = query(
 	{
 		title: "Get pending transactions",
-		description: "List pending (not yet settled) transactions across connected accounts.",
-		input: Empty,
+		description: "Pending (not yet settled) transactions across connected accounts, or for one account_id. Always live. Pending rows have no id, merchant or category, and can change or disappear before they settle.",
+		input: object({ account_id: string({ minLength: 1 }).optional() }),
 		output: array(Txn),
 		annotations: READ,
 	},
-	async (ctx: Ctx) => (await getItems(client(ctx), "/transactions/pending", PendingTransaction)).map(txn),
+	async (ctx: Ctx, { account_id }) => {
+		const path = account_id ? `/accounts/${encodeURIComponent(account_id)}/transactions/pending` : "/transactions/pending";
+		return (await getItems(client(ctx), path, PendingTransaction)).map(txn);
+	},
+);
+
+const MAX_IDS = 100;
+
+const getManyTransactions = query(
+	{
+		title: "Get transactions by id",
+		description: `Fetch up to ${MAX_IDS} settled transactions by id (trans_...) in one request, for example the evidence ids in an insights report. missing_ids lists ids Akahu did not return: the transaction may have been deleted, or re-issued under a new id when the bank changed it or the account moved to official open banking.`,
+		input: object({ transaction_ids: array(string({ minLength: 1 })) }),
+		output: object({ transactions: array(Txn), missing_ids: array(string()) }),
+		annotations: READ,
+	},
+	async (ctx: Ctx, { transaction_ids }) => {
+		const ids = [...new Set(transaction_ids)];
+		if (ids.length === 0 || ids.length > MAX_IDS) throw new Error(`transaction_ids must contain 1 to ${MAX_IDS} distinct ids`);
+		const { items } = await postRead(client(ctx), "/transactions/ids", ids, object({ items: array(Transaction) }));
+		const found = new Set(items.map((t) => t._id));
+		return { transactions: items.map(txn), missing_ids: ids.filter((id) => !found.has(id)) };
+	},
 );
 
 const getTransactionSummary = query(
 	{
 		title: "Summarise transactions",
 		description:
-			"Totals of settled transactions separated by account currency, then grouped by category, merchant or type (group_by, default category), for an optional start/end range and account_id. No FX conversion. unknown_currency_transaction_ids identifies rows counted but excluded from totals because currency is unavailable. spending_only excludes money in; debits include transfers, not mobile spending classifications. Groups are sorted most negative first.",
+			"Totals of settled transactions separated by account currency, then grouped by category, personal-finance group, merchant or type (group_by: category (default), group, merchant or type), for an optional start/end range, account_id and group filter. No FX conversion. unknown_currency_transaction_ids identifies rows counted but excluded from totals because currency is unavailable. spending_only excludes money in; debits include transfers, not mobile spending classifications. Groups are sorted most negative first.",
 		input: object({
 			start: string().optional(),
 			end: string().optional(),
 			group_by: string().default("category"),
 			account_id: string().optional(),
+			group: string().optional(),
 			spending_only: boolean().default(false),
 		}),
 		output: object({
@@ -106,11 +135,12 @@ const getTransactionSummary = query(
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
-		if (!["category", "merchant", "type"].includes(i.group_by)) throw new Error("group_by must be category, merchant or type");
+		if (!["category", "group", "merchant", "type"].includes(i.group_by)) throw new Error("group_by must be category, group, merchant or type");
+		const group = resolveGroup(i.group);
 		const rows = await fetchTransactions(
 			client(ctx),
 			{ start: i.start, end: i.end },
-			{ accountId: i.account_id, filter: i.spending_only ? (t) => t.amount < 0 : undefined },
+			{ accountId: i.account_id, filter: (t) => (!i.spending_only || t.amount < 0) && (group === undefined || groupOf(t) === group) },
 		);
 		const { groups: currencies, unknown_currency_transaction_ids } = groupCurrencies(rows, await fetchAccounts(client(ctx)));
 		return {
@@ -122,6 +152,7 @@ const getTransactionSummary = query(
 				for (const t of rows) {
 					const key =
 						i.group_by === "category" ? (t.category?.name ?? "Uncategorised") :
+						i.group_by === "group" ? (groupOf(t) ?? "Ungrouped") :
 						i.group_by === "merchant" ? (t.merchant?.name ?? "Unknown") : t.type;
 					const g = groups.get(key) ?? { count: 0, total: 0 };
 					g.count++;
@@ -142,7 +173,7 @@ const getTransactionSummary = query(
 );
 
 export const transactions = router(
-	{ search: getTransactions, get: getTransaction, pending: getPendingTransactions, summary: getTransactionSummary },
+	{ search: getTransactions, get: getTransaction, getMany: getManyTransactions, pending: getPendingTransactions, summary: getTransactionSummary },
 	{
 		title: "Transactions",
 		description: "Settled and pending transactions, filtered lists and grouped totals.",

@@ -18,21 +18,42 @@ Executor stores the tokens and only adds them to HTTPS requests to
 
 ## Tools
 
-| Tool | Purpose |
-| --- | --- |
-| `accounts.list` | Connected accounts and balances |
-| `transactions.search`, `transactions.get` | Settled transactions |
-| `transactions.pending` | Pending transactions |
-| `transactions.summary` | Totals by category, merchant or type |
-| `insights.compare` | Compare two periods (see below) |
-| `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report |
-| `identity.me` | The connected Akahu user |
-| `admin.refresh` | Ask Akahu to refresh; needs approval on every call |
+| Tool | Purpose | Approval |
+| --- | --- | --- |
+| `accounts.list` | Connected accounts and balances (cached 5 min) | |
+| `accounts.get` | One account, live | |
+| `accounts.freshness` | Sync ages per account, with warnings for INACTIVE, never-synced or stale data | |
+| `transactions.search`, `transactions.get` | Settled transactions | |
+| `transactions.getMany` | Up to 100 transactions by id, reporting ids Akahu no longer has | |
+| `transactions.pending` | Pending transactions, for all accounts or one | |
+| `transactions.summary` | Totals by category, personal-finance group, merchant or type | |
+| `categories.list` | The bundled NZFCC categories and groups | |
+| `insights.compare` | Compare two periods (see below) | |
+| `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report | |
+| `identity.me` | The connected Akahu user | |
+| `identity.parties` | Identity data the banks hold; only the requested fields | Every call |
+| `identity.verifyName` | Check a name against holder and party names | Every call |
+| `admin.refresh` | Ask Akahu to refresh | Every call |
+| `admin.reportEnrichmentIssue` | Report a wrong merchant/category or a duplicate to Akahu | Every call |
 
-All tools except `admin.refresh` are read-only, and none can make payments.
-Each tool declares MCP annotations and an output schema. Category and
-connection listings are not available because they need an Akahu app secret,
-which Personal Apps do not have.
+Only the two `admin` tools change anything at Akahu, and none can make payments
+(Personal Apps cannot). Each tool declares MCP annotations and an output schema.
+An approval covers the exact arguments shown, so approving a name-only
+`identity.parties` call does not approve reading the IRD number.
+
+Akahu's category and connection listings need an app secret, which Personal Apps
+do not have. The app bundles the public [NZFCC](https://nzfcc.org) category list
+instead (`categories.ts`); `search` and `summary` accept a personal-finance
+`group` such as `Food` or `Transport`.
+
+## Identity data
+
+`identity.parties` returns only the fields you ask for (`name` by default; also
+`dob`, `tax_number` (IRD number), `email_addresses`, `phone_numbers` and
+`addresses`). Other fields that exist are listed in `withheld_fields`, never
+returned. `identity.verifyName` reports which name parts matched and where, but
+does not repeat the bank's version of the name. Both pass data through Executor
+and your agent's model provider, so ask for identity data only when a task needs it.
 
 ## Currency totals
 
@@ -61,7 +82,7 @@ date) would be dropped.
 
 - Account lists are cached for 5 minutes and settled transaction pages for 15,
   per connected Akahu account, using Executor's app cache. Pending transactions,
-  single transactions and `identity.me` are always fetched live.
+  single or batch lookups, `accounts.get` and identity data are always fetched live.
 - `admin.refresh` starts a new cache generation, so nothing cached before the
   refresh request is served afterwards. Akahu still needs time to sync the bank.
 - Reads that Akahu rate-limits (429) are retried up to three times with jittered
@@ -153,7 +174,8 @@ MCP session or proof that a particular client renders the form correctly.
 | `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
 | `schemas.ts` | Akahu response decoders and agent-facing output shapes |
 | `compare.ts` | Pure period-comparison logic |
-| `tools/*.ts` | One router per group (`accounts`, `transactions`, `insights`, `identity`, `admin`) |
+| `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
+| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `identity`, `admin`) |
 
 ## Develop and deploy
 

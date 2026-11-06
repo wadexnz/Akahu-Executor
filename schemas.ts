@@ -31,10 +31,33 @@ export const Account = object({
 	attributes: array(string()),
 	formatted_account: string().optional(),
 	refreshed: record(string()).optional(),
-	connection: object({ name: string() }),
-	balance: object({ currency: string(), current: number(), available: number().optional() }).optional(),
+	connection: object({ name: string(), connection_type: string().optional() }),
+	balance: object({
+		currency: string(), current: number(), available: number().optional(), limit: number().optional(), overdrawn: boolean().optional(),
+	}).optional(),
 });
 export type Account = Infer<typeof Account>;
+const Value = object({ value: string() });
+export const Party = object({
+	_id: string(),
+	_connection: string(),
+	name: Value.optional(),
+	dob: Value.optional(),
+	tax_number: Value.optional(),
+	phone_numbers: array(object({ value: string(), subtype: string().optional(), verified: boolean().optional() })).optional(),
+	email_addresses: array(object({ value: string(), subtype: string().optional(), verified: boolean().optional() })).optional(),
+	addresses: array(object({ value: string(), subtype: string().optional(), formatted: string().optional() })).optional(),
+});
+export type Party = Infer<typeof Party>;
+const NameFlags = object({ given_name: boolean(), middle_name: boolean(), family_name: boolean(), middle_initial: boolean(), given_initial: boolean() });
+export const NameVerification = object({
+	sources: array(object({
+		type: string(),
+		match_result: string(),
+		verification: NameFlags,
+		meta: object({ _id: string().optional(), formatted_account: string().optional(), sources: array(string()).optional() }),
+	})),
+});
 export const User = object({
 	_id: string(), email: string().optional(), preferred_name: string().optional(), access_granted_at: string().optional(),
 });
@@ -55,6 +78,7 @@ export const Txn = object({
 	balance: number().optional(),
 	merchant: string().optional(),
 	category: string().optional(),
+	category_group: string().optional(),
 	particulars: string().optional(),
 	code: string().optional(),
 	reference: string().optional(),
@@ -70,7 +94,8 @@ export const AccountOut = object({
 	type: string(),
 	status: string(),
 	has_transactions: boolean(),
-	balance: object({ currency: string(), current: number(), available: number() }).optional(),
+	balance: object({ currency: string(), current: number(), available: number(), limit: number().optional(), overdrawn: boolean().optional() }).optional(),
+	connection_type: string().optional(),
 	refreshed: record(string()).optional(),
 });
 export const Delta = object({

@@ -24,6 +24,7 @@ export function txn(t: Transaction | PendingTransaction) {
 		...(t.balance !== undefined && { balance: t.balance }),
 		...(t.merchant && { merchant: t.merchant.name }),
 		...(t.category && { category: t.category.name }),
+		...(t.category?.groups?.personal_finance && { category_group: t.category.groups.personal_finance.name }),
 		...(m?.particulars && { particulars: m.particulars }),
 		...(m?.code && { code: m.code }),
 		...(m?.reference && { reference: m.reference }),

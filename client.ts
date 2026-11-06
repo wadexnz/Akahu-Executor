@@ -1,4 +1,4 @@
-import { array, decodeJson, json, number, object, ProviderError, string, type AppCache, type CacheGetOptions, type Schema } from "apps";
+import { array, decodeJson, json as jsonValue, number, object, ProviderError, string, type AppCache, type CacheGetOptions, type Schema } from "apps";
 import { Account, Transaction } from "./schemas.js";
 
 export const API = "https://api.akahu.io/v1";
@@ -47,30 +47,33 @@ function sleep(ms: number, signal: AbortSignal) {
 }
 
 // Reads retry on 429. Writes do not: a rate-limited refresh is reported, not repeated.
-async function get(c: Akahu, target: string) {
+async function send(c: Akahu, target: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}, retry = true) {
 	for (let attempt = 0; ; attempt++) {
-		const r = await c.fetch(target, { headers: c.headers, signal: c.signal });
-		if (r.status !== 429 || attempt >= RETRIES) return r;
+		const r = await c.fetch(target, { ...init, headers: { ...c.headers, ...init.headers }, signal: c.signal });
+		if (!retry || r.status !== 429 || attempt >= RETRIES) return r;
 		await r.body?.cancel();
 		await sleep(retryDelay(attempt, r.headers.get("retry-after")), c.signal);
 	}
 }
 
+const json = (body: unknown) => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
 export async function getItems<T>(c: Akahu, path: string, item: Schema<T, boolean>): Promise<T[]> {
-	return [...(await decode(await get(c, url(path)), object({ items: array(item) }))).items];
+	return [...(await decode(await send(c, url(path)), object({ items: array(item) }))).items];
 }
 
 export async function getItem<T>(c: Akahu, path: string, item: Schema<T, boolean>): Promise<T> {
-	return (await decode(await get(c, url(path)), object({ item }))).item;
+	return (await decode(await send(c, url(path)), object({ item }))).item;
 }
 
-export async function post(c: Akahu, path: string): Promise<void> {
-	const r = await c.fetch(url(path), {
-		method: "POST",
-		headers: { ...c.headers, "idempotency-key": crypto.randomUUID() },
-		signal: c.signal,
-	});
-	await decode(r, object({}));
+// Akahu's read endpoints that take a JSON body, such as POST /transactions/ids.
+export async function postRead<T>(c: Akahu, path: string, body: unknown, schema: Schema<T, boolean>): Promise<T> {
+	return decode(await send(c, url(path), json(body)), schema);
+}
+
+export async function post(c: Akahu, path: string, body?: unknown): Promise<void> {
+	const init = body === undefined ? { method: "POST", headers: {} } : json(body);
+	await decode(await send(c, url(path), { ...init, headers: { ...init.headers, "idempotency-key": crypto.randomUUID() } }, false), object({}));
 }
 
 // Cache keys include a generation that admin.refresh bumps, so data cached before
@@ -132,8 +135,8 @@ export async function fetchTransactions(
 	let cursor: string | undefined;
 	do {
 		const page = await cached(c, ["transactions", path, query.start ?? null, query.end ?? null, cursor ?? null], Page, "15 minutes", async (c) => {
-			const body = await decode(await get(c, url(path, { ...query, cursor })), object({
-				items: array(Transaction), cursor: object({ next: json().optional() }).optional(),
+			const body = await decode(await send(c, url(path, { ...query, cursor })), object({
+				items: array(Transaction), cursor: object({ next: jsonValue().optional() }).optional(),
 			}));
 			const next = body.cursor?.next;
 			return { items: [...body.items], ...(next != null && { next: string().parse(next) }) };
