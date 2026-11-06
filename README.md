@@ -38,6 +38,10 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `memory.setNote`, `memory.tag`, `memory.untag`, `memory.listTags` | Private notes and tags on transactions | |
 | `memory.addRule`, `memory.listRules`, `memory.removeRule` | Rules that mark transactions as transfers or leave them out of insights | |
 | `memory.setBudget`, `memory.listBudgets` | Monthly budgets per personal-finance group | |
+| `monitor.check` | Save today's balances and raise new alerts (the daily schedule runs it) | |
+| `monitor.alerts`, `monitor.acknowledge` | Alerts raised so far, and marking them seen | |
+| `monitor.setLowBalance`, `monitor.lowBalanceAlerts` | Low-balance thresholds per account | |
+| `monitor.balanceHistory` | Daily balance snapshots and per-currency totals | |
 | `identity.me` | The connected Akahu user | |
 | `identity.parties` | Identity data the banks hold; only the requested fields | Every call |
 | `identity.verifyName` | Check a name against holder and party names | Every call |
@@ -45,8 +49,8 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `admin.reportEnrichmentIssue` | Report a wrong merchant/category or a duplicate to Akahu | Every call |
 
 Only the two `admin` tools change anything at Akahu, and none can make payments
-(Personal Apps cannot). The `memory` tools write only to this app's own
-database. Each tool declares MCP annotations and an output schema.
+(Personal Apps cannot). The `memory` and `monitor` tools write only to this
+app's own database. Each tool declares MCP annotations and an output schema.
 An approval covers the exact arguments shown, so approving a name-only
 `identity.parties` call does not approve reading the IRD number.
 
@@ -206,6 +210,32 @@ The skills [`finding-subscriptions`](skills/finding-subscriptions/SKILL.md),
 [`akahu-data-limits`](skills/akahu-data-limits/SKILL.md) guide agents through
 these tools.
 
+## Daily check and alerts
+
+Akahu keeps no balance history, so the app saves its own. `monitor.check` saves
+one balance snapshot per account per NZ calendar day and raises these alerts:
+
+| Kind | When |
+| --- | --- |
+| `low_balance` | The available balance falls below a threshold set with `monitor.setLowBalance` (once per drop, not every day it stays low) |
+| `unusual_debit` | A debit of at least 100 in the last 7 days to a new payee, or at least 3 times that payee's usual amount |
+| `new_recurring` | A regular payment first seen in the last 100 days |
+| `stale_feed` | An account's transactions have not synced for 48 hours |
+| `feed_inactive` | Akahu can no longer sync an account |
+
+Each alert is raised once, however often the check runs. It is stored for
+`monitor.alerts` and emitted as an `alert.raised` event (filter: `kind`) that
+MCP clients can subscribe to. The event carries only ids; the message, which
+includes amounts and merchant names, stays in the app. Transfers between your
+own accounts and your `memory` rules are applied as in the insights. If Akahu's
+transaction history cannot be read, balances and balance alerts are still saved
+and the result reports `transaction_checks: "failed"`.
+
+The `dailyCheck` schedule runs `monitor.check` at 7am NZ time. Like every
+Executor user schedule it starts paused: enable it in the app's **Schedules**
+tab. Each member who enables it gets their own copy, run with their own Akahu
+connection.
+
 ## Layout
 
 | File | Contents |
@@ -217,9 +247,9 @@ these tools.
 | `schemas.ts` | Akahu response decoders and agent-facing output shapes |
 | `compare.ts` | Pure period-comparison logic |
 | `analysis.ts` | Pure NZ-date, rule, transfer-pairing, recurring and unusual-debit logic |
-| `migrations/` | The app database schema for memory |
+| `migrations/` | The app database schema for memory, balance snapshots and alerts |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
-| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `identity`, `admin`) |
+| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `monitor`, `identity`, `admin`) |
 | `test-database.ts` | An in-memory SQLite app database for tests, with the real migrations |
 
 ## Develop and deploy

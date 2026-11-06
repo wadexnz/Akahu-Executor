@@ -24,6 +24,9 @@ A short, evidence-backed review of one NZ calendar month and the month before it
    payments with their ids.
 6. Optionally `insights.recurring` to mention renewals due before the month ends
    (`next_expected`).
+7. `monitor.alerts` for alerts the user has not seen yet, and
+   `monitor.balanceHistory` to show how balances moved over the month (history
+   starts when the daily check first ran).
 
 ## Report
 

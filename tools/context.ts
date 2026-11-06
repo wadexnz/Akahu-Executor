@@ -1,9 +1,16 @@
-import type { MutationContext, QueryContext } from "apps";
+import { event, object, string, type MutationContext, type QueryContext } from "apps";
 import type { Akahu } from "../client.js";
 import { akahu } from "../provider.js";
 import type { Account, PendingTransaction, Transaction } from "../schemas.js";
 
-export const requirements = { user: { accounts: { akahu } } };
+// Raised by monitor.check. The payload carries ids only; monitor.alerts has the message.
+const alertRaised = event({
+	description: "A new Akahu alert: a balance below the user's threshold, a large or unusual debit, a new recurring payment, or a bank feed that stopped syncing. Read it with monitor.alerts.",
+	filters: { kind: string() },
+	payload: object({ alert_id: string(), kind: string(), account_id: string().optional(), transaction_id: string().optional() }),
+});
+
+export const requirements = { user: { accounts: { akahu } }, events: { "alert.raised": alertRaised } };
 export type Ctx = QueryContext<typeof requirements> | MutationContext<typeof requirements>;
 export type WriteCtx = MutationContext<typeof requirements>;
 

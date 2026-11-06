@@ -25,6 +25,12 @@ looks wrong.
   within an hour of the last one. New data can take minutes to appear. Insights
   read settled pages cached for up to 15 minutes, and account lists for 5 minutes.
 
+## Balance history
+
+- Akahu reports only today's balance. `monitor.balanceHistory` shows the app's own
+  daily snapshots, which start when `monitor.check` first ran; days the check did
+  not run are gaps, not changes.
+
 ## Pending and settled
 
 - Pending transactions (`transactions.pending`) have no id, merchant or category,
