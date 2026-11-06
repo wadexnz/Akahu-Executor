@@ -2,9 +2,9 @@ import { array, boolean, mutation, number, object, query, router, string } from 
 import { nzDay, priced, round } from "../analysis.js";
 import { classify, FLOWS, REVIEW_REASONS, reviewCases, ruleMatches, type Classified } from "../classify.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
-import { CaseTxn, Interval } from "../schemas.js";
+import { DecideOut, DecisionChoice, Interval, Match, PreviewRuleOut, ReviewCasesOut } from "../schemas.js";
 import { client, flowsFor, READ, txn, type Ctx, type WriteCtx } from "./context.js";
-import { cleanRule, loadDecisions, loadRules, Match, owner } from "./memory.js";
+import { cleanRule, loadDecisions, loadRules, owner } from "./memory.js";
 
 const MAX_DECISIONS = 100;
 // "automatic" drops the user's call; "unset" removes this id's saved row entirely (only undo
@@ -20,16 +20,12 @@ function period(start: string | undefined, end: string | undefined, days: number
 
 const caseRow = (t: Classified) => ({ ...txn(t), flow: t.flow, currency: t.currency });
 
-const cases = query(
+export const cases = query(
 	{
 		title: "List review cases",
 		description: `The mobile app's review inbox for settled transactions between start and end (default the last 90 days), optionally for one account_id: each case is a flow that rests on a guess, with its reason (transfer: two of the user's accounts matched by amount and day only; provider: a credit matched to a saving provider by name only; category: a broad financial-services category counted as saving) and the transactions to decide together (both sides of a transfer pair), plus evidence (the payment a provider credit was matched to). include_reviewed also lists the user's saved decisions (reason reviewed) so they can be changed. Decide with review.decide.`,
 		input: object({ start: string().optional(), end: string().optional(), account_id: string().optional(), include_reviewed: boolean().default(false) }),
-		output: object({
-			period: Interval,
-			cases: array(object({ id: string(), reason: string(), explanation: string(), transactions: array(CaseTxn), evidence: CaseTxn.optional() })),
-			decision_count: number(),
-		}),
+		output: ReviewCasesOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
@@ -50,14 +46,12 @@ const cases = query(
 	},
 );
 
-const Choice = object({ transaction_id: string({ minLength: 1 }), flow: string(), paired_id: string().optional() });
-
-const decide = mutation(
+export const decide = mutation(
 	{
 		title: "Decide transaction flows",
 		description: `Save the user's own flow for up to ${MAX_DECISIONS} settled transactions, ahead of every rule and the automatic classification (as the mobile app's review does): spending, income, transfer or saving, or automatic to drop an earlier decision. Decide both sides of a transfer pair together, each with paired_id set to the other side. A decision follows the transaction when its bank moves to official open banking (new id). previous holds each transaction's earlier state in the same shape (flow unset means nothing was saved); pass it back to undo. Only save what the user chose.`,
-		input: object({ decisions: array(Choice) }),
-		output: object({ saved: number(), previous: array(Choice) }),
+		input: object({ decisions: array(DecisionChoice) }),
+		output: DecideOut,
 		annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 	},
 	async (ctx: WriteCtx, { decisions }) => {
@@ -87,17 +81,12 @@ const decide = mutation(
 
 const MAX_EXAMPLES = 20;
 
-const previewRule = query(
+export const previewRule = query(
 	{
 		title: "Preview an insights rule",
 		description: `What memory.addRule would change before it is saved (the mobile app's rule preview): kind and match as for addRule, over settled transactions between start and end (default the last 12 months). Returns how many transactions match, how many would change flow and from what to what, how many keep their flow because the user decided them or an earlier rule already matches, and up to ${MAX_EXAMPLES} changed transactions as examples. Nothing is saved.`,
 		input: object({ kind: string(), match: Match, start: string().optional(), end: string().optional() }),
-		output: object({
-			period: Interval, rule: object({ kind: string(), match: Match }),
-			matches: number(), would_change: number(), kept_by_decision: number(), kept_by_earlier_rule: number(),
-			changes: array(object({ from: string(), to: string(), count: number() })),
-			examples: array(object({ id: string(), date: string(), description: string(), amount: number(), currency: string(), from: string(), to: string() })),
-		}),
+		output: PreviewRuleOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {

@@ -4,7 +4,7 @@ import {
 } from "../analysis.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { compareInsights } from "../compare.js";
-import { BudgetStatusOut, CashflowOut, CompareInput, CompareOut, Currencies, Interval, RecurringOut, RulesApplied } from "../schemas.js";
+import { BudgetStatusOut, CashflowOut, CompareInput, CompareOut, ContributionsOut, Currencies, Interval, RecurringOut, RulesApplied } from "../schemas.js";
 import { investmentContributions as contributions, rulesApplied, type Classified } from "../classify.js";
 import { client, flowsFor, READ, type Ctx } from "./context.js";
 import { loadBudgets, owner } from "./memory.js";
@@ -293,20 +293,12 @@ export const budgetStatus = query(
 	},
 );
 
-const investmentContributions = query(
+export const investmentContributions = query(
 	{
 		title: "Investment contributions",
 		description: "The mobile app's investment contributions (virtual accounts) between start and end (default the last 24 months, about all Akahu keeps): every saving provider the user pays outside their connected accounts (a merchant on a saving-flow payment, such as an investment or savings app), per currency, with what was paid in, withdrawn (credits matched by the provider's name) and net contributed, the last activity, and evidence ids (newest first, up to 20). Not a balance: growth and fees at the provider are not seen. Decisions that a row is not saving are respected.",
 		input: object({ start: string().optional(), end: string().optional() }),
-		output: object({
-			period: Interval,
-			providers: array(object({
-				provider: string(), aliases: array(string()), currency: string(), paid_in: number(), withdrawn: number(), net_contributed: number(),
-				transaction_count: number(), last_activity: string(), evidence_ids: array(string()),
-			})),
-			rules_applied: RulesApplied,
-			unknown_currency_transaction_ids: Currencies,
-		}),
+		output: ContributionsOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {

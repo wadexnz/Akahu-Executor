@@ -185,3 +185,52 @@ export const BalanceHistoryOut = object({
 	accounts: array(object({ account_id: string(), currency: string(), snapshots: array(object({ day: string(), current: number(), available: number() })) })),
 	totals: array(object({ currency: string(), days: array(object({ day: string(), current: number(), accounts_counted: number() })) })),
 });
+
+// Shapes of the review, transactions, memory and accounts tools the dashboard reads.
+export const Synced = object({ at: string(), age_hours: number().optional() });
+export const Match = object({ description: string().optional(), merchant: string().optional(), other_account: string().optional(), account_id: string().optional(), direction: string().optional() });
+export const RuleOut = object({ id: string(), kind: string(), match: Match, reason: string().optional() });
+export const DecisionChoice = object({ transaction_id: string({ minLength: 1 }), flow: string(), paired_id: string().optional() });
+export const NetWorthOut = object({
+	currencies: array(object({ currency: string(), cash: number(), other_assets: number(), debt: number(), net: number(), account_count: number() })),
+	excluded_account_ids: array(string()),
+});
+export const FreshnessOut = object({
+	checked_at: string(),
+	accounts: array(object({
+		id: string(), name: string(), bank: string(), status: string(), connection_type: string().optional(),
+		refreshed: object({ balance: Synced.optional(), meta: Synced.optional(), transactions: Synced.optional(), party: Synced.optional() }),
+		warnings: array(string()),
+	})),
+});
+export const ContributionsOut = object({
+	period: Interval,
+	providers: array(object({
+		provider: string(), aliases: array(string()), currency: string(), paid_in: number(), withdrawn: number(), net_contributed: number(),
+		transaction_count: number(), last_activity: string(), evidence_ids: array(string()),
+	})),
+	rules_applied: RulesApplied,
+	unknown_currency_transaction_ids: Currencies,
+});
+export const NoteOut = object({ transaction_id: string(), note: string().optional(), deleted: boolean() });
+export const TagOut = object({ tag: string(), added: number() });
+export const UntagOut = object({ tag: string(), removed: number() });
+export const RemovedOut = object({ removed: boolean() });
+export const SearchOut = object({
+	count: number(), truncated: boolean(), transactions: array(Txn),
+	currencies: array(object({ currency: string(), net_total: number() })),
+	unknown_currency_transaction_ids: array(string()),
+});
+export const CsvOut = object({ filename: string(), rows: number(), truncated: boolean(), csv: string() });
+export const ReviewCasesOut = object({
+	period: Interval,
+	cases: array(object({ id: string(), reason: string(), explanation: string(), transactions: array(CaseTxn), evidence: CaseTxn.optional() })),
+	decision_count: number(),
+});
+export const DecideOut = object({ saved: number(), previous: array(DecisionChoice) });
+export const PreviewRuleOut = object({
+	period: Interval, rule: object({ kind: string(), match: Match }),
+	matches: number(), would_change: number(), kept_by_decision: number(), kept_by_earlier_rule: number(),
+	changes: array(object({ from: string(), to: string(), count: number() })),
+	examples: array(object({ id: string(), date: string(), description: string(), amount: number(), currency: string(), from: string(), to: string() })),
+});

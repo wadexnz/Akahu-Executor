@@ -276,22 +276,30 @@ Executor user schedule it starts paused: enable it in the app's **Schedules**
 tab. Each member who enables it gets their own copy, run with their own Akahu
 connection.
 
-## Monthly review dashboard
+## Dashboard
 
 The app also serves a private page in Executor (`ui/`, React and Tailwind),
-signed in with your Executor session. It reads only through the tools above,
-as you, with your own Akahu connection:
+signed in with your Executor session. It follows the NZ Account Thread mobile
+app's design (its colours, flow pills and category icons, light and dark). It
+reads and writes only through the tools above, as you, with your own Akahu
+connection. Tabs sit at the top on desktop and at the bottom on phones.
 
-- **Cashflow** from `insights.cashflow` for the last 6 months; click a month to
-  review it.
-- **Budgets** from `insights.budgetStatus` for that month, with a marker for how
-  much of the month has passed. Set or change a budget inline
-  (`memory.setBudget`; 0 removes it).
-- **Upcoming bills**: active `insights.recurring` payments expected in the next
-  14 days (predicted from past payments).
-- **Balances** from `accounts.list` with 30-day sparklines from
-  `monitor.balanceHistory`, and net worth per currency.
-- **Alerts** from `monitor.alerts`, with **Mark seen** (`monitor.acknowledge`).
+- **Home**, the monthly review: net, income, spending and saving for the chosen
+  month (`insights.cashflow`), a banner when `review.cases` has flows to check,
+  the last 6 months, top spending largest first, upcoming bills predicted from
+  `insights.recurring`, and cash, other assets and debt (`accounts.netWorth`).
+- **Transactions**: search and filter (`transactions.search`), rows grouped by
+  day, **Export CSV** (`transactions.exportCsv`), and a **Review** view of
+  `review.cases`. A transaction's panel changes its flow (`review.decide`, with
+  undo), edits its note and tags (`memory.setNote`, `tag`, `untag`), and makes
+  a rule after previewing it (`review.previewRule`, then `memory.addRule`).
+- **Accounts**: net worth with its daily history (`monitor.balanceHistory`),
+  accounts by bank with sync status (`accounts.freshness`), and investment
+  contributions (`insights.investmentContributions`).
+- **More**: alerts (`monitor.alerts`, `monitor.acknowledge`), budgets
+  (`insights.budgetStatus`, `memory.setBudget`; 0 removes one), rules
+  (`memory.listRules`, `memory.removeRule`) and the theme (light, dark or
+  system, kept in this browser).
 
 After deploying, `tools.executor.appUi.location` returns the page's URL.
 
@@ -310,7 +318,7 @@ After deploying, `tools.executor.appUi.location` returns the page's URL.
 | `migrations/` | The app database schema for memory, balance snapshots, alerts and review decisions |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
 | `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `review`, `memory`, `monitor`, `identity`, `admin`) |
-| `ui/` | The monthly review dashboard; imports tool types only, plus `schemas.ts` |
+| `ui/` | The dashboard: `main.tsx` (tabs and routes), one file per page, `shared.tsx`, and Lucide icons in `icon-data.ts`; imports tool types only, plus `schemas.ts` |
 | `test-database.ts` | An in-memory SQLite app database for tests, with the real migrations |
 
 ## Develop and deploy

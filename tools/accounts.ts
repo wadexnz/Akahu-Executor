@@ -1,6 +1,6 @@
 import { array, number, object, query, router, string } from "apps";
 import { fetchAccounts, getItem } from "../client.js";
-import { Account, AccountOut, Empty } from "../schemas.js";
+import { Account, AccountOut, Empty, FreshnessOut, NetWorthOut } from "../schemas.js";
 import { client, READ, round, type Ctx } from "./context.js";
 
 function accountOut(a: Account) {
@@ -48,15 +48,12 @@ const getAccount = query(
 
 const CASH_TYPES = new Set(["CHECKING", "SAVINGS", "WALLET", "FOREIGN"]);
 
-const netWorth = query(
+export const netWorth = query(
 	{
 		title: "Net worth: cash, other assets and debt",
 		description: "The mobile app's balance overview, per currency (never converted): cash (positive current balances of everyday, savings, wallet and foreign-currency accounts), other assets (positive balances of KiwiSaver, investment, term deposit and other accounts), debt (money owed on accounts with a negative current balance, shown positive) and net (assets minus debt). Available credit is not cash. Accounts without a balance are listed in excluded_account_ids.",
 		input: Empty,
-		output: object({
-			currencies: array(object({ currency: string(), cash: number(), other_assets: number(), debt: number(), net: number(), account_count: number() })),
-			excluded_account_ids: array(string()),
-		}),
+		output: NetWorthOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx) => {
@@ -85,21 +82,13 @@ const netWorth = query(
 
 // Akahu syncs Personal App data daily; older than this suggests a sync problem.
 const STALE_HOURS = 36;
-const Synced = object({ at: string(), age_hours: number().optional() });
 
-const accountFreshness = query(
+export const accountFreshness = query(
 	{
 		title: "Check data freshness",
 		description: `When Akahu last synced each account's balance, metadata, transactions and identity data, with plain warnings for INACTIVE accounts, transactions never synced, and balances or transactions older than ${STALE_HOURS} hours. Use before trusting totals or when data looks out of date.`,
 		input: Empty,
-		output: object({
-			checked_at: string(),
-			accounts: array(object({
-				id: string(), name: string(), bank: string(), status: string(), connection_type: string().optional(),
-				refreshed: object({ balance: Synced.optional(), meta: Synced.optional(), transactions: Synced.optional(), party: Synced.optional() }),
-				warnings: array(string()),
-			})),
-		}),
+		output: FreshnessOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx) => {

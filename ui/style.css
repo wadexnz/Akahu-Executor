@@ -1,26 +1,81 @@
 @import "tailwindcss";
 
+/* The NZ Account Thread mobile app's tokens (mobile/src/lib/theme.tsx), light and dark. */
+:root {
+  --bg: #ffffff;
+  --ink: #18222d;
+  --muted: #586573;
+  --primary: #2855a6;
+  --on-primary: #ffffff;
+  --soft: #eef3fa;
+  --line: #d8e0e8;
+  --danger: #b33131;
+  --warning: #865c12;
+  --warning-soft: #fbf3dd;
+  --spending: #a25d43;
+  --income: #24714f;
+  --transfer: #426fa5;
+  --saving: #7954a3;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #17191d;
+  --ink: #f0f2f5;
+  --muted: #b0b7c1;
+  --primary: #d8b46a;
+  --on-primary: #17191d;
+  --soft: #292a2d;
+  --line: #3d424b;
+  --danger: #ffaaaa;
+  --warning: #e4c486;
+  --warning-soft: #2e2a20;
+  --spending: #e6a58c;
+  --income: #8acba6;
+  --transfer: #96b9e6;
+  --saving: #c3a7e8;
+  color-scheme: dark;
+}
+
 @theme {
-  --color-paper: #f7f5f0;
-  --color-ink: #1f2a44;
-  --color-muted: #6b7280;
-  --color-line: #e7e3da;
-  --color-income: #6aa57c;
-  --color-spend: #ef8f7c;
-  --color-pace: #f2b65a;
-  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-bg: var(--bg);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-soft: var(--soft);
+  --color-line: var(--line);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-spending: var(--spending);
+  --color-income: var(--income);
+  --color-transfer: var(--transfer);
+  --color-saving: var(--saving);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, "Segoe UI", Roboto, sans-serif;
 }
 
 @layer base {
   :root {
     font-family: var(--font-sans);
-    color: var(--color-ink);
-    background: var(--color-paper);
+    color: var(--ink);
+    background: var(--bg);
     font-synthesis: none;
     font-variant-numeric: tabular-nums;
   }
   body {
     margin: 0;
+  }
+  button,
+  input,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
   }
 }

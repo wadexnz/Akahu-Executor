@@ -3,7 +3,7 @@ import { groupOf, nzStartOf, nzDay } from "../analysis.js";
 import { FLOWS, type Classified } from "../classify.js";
 import { resolveGroup } from "../categories.js";
 import { AkahuRejected, fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
-import { PendingTransaction, Transaction, Txn } from "../schemas.js";
+import { CsvOut, PendingTransaction, SearchOut, Transaction, Txn } from "../schemas.js";
 import { client, flowsFor, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
 import { annotationsFor, owner, taggedIds } from "./memory.js";
 
@@ -76,7 +76,7 @@ async function filtered(ctx: Ctx, i: Infer<typeof FilterInput>) {
 	return { rows, flows, accounts };
 }
 
-const getTransactions = query(
+export const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
@@ -85,11 +85,7 @@ const getTransactions = query(
 			...Filters,
 			limit: number().default(500),
 		}),
-		output: object({
-			count: number(), truncated: boolean(), transactions: array(Txn),
-			currencies: array(object({ currency: string(), net_total: number() })),
-			unknown_currency_transaction_ids: array(string()),
-		}),
+		output: SearchOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
@@ -230,12 +226,12 @@ const cell = (value: string) => {
 	return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
-const exportCsv = query(
+export const exportCsv = query(
 	{
 		title: "Export transactions as CSV",
 		description: `Settled transactions as CSV text, with the same filters as transactions.search (the mobile app's export): ID, NZ date, bank, account, description, merchant, category, flow, currency, amount, tags and note, newest first. limit defaults to 2000 rows, at most ${MAX_CSV_ROWS}; truncated says whether rows were left out. Amounts are in each account's own currency and are never converted. Give the user the csv as a file; do not paste a long one into the chat.`,
 		input: object({ ...Filters, limit: number().default(2000) }),
-		output: object({ filename: string(), rows: number(), truncated: boolean(), csv: string() }),
+		output: CsvOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {

@@ -7,7 +7,7 @@
     "title": "Akahu"
   },
   "scripts": {
-    "typecheck": "npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types bun index.ts demo.ts *.test.ts && npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module esnext --moduleResolution bundler --target es2022 --jsx react-jsx --lib es2022,dom,dom.iterable --types react ui/main.tsx ui/assets.d.ts",
+    "typecheck": "npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types bun index.ts demo.ts *.test.ts && npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module esnext --moduleResolution bundler --target es2022 --jsx react-jsx --lib es2022,dom,dom.iterable --types react ui/*.tsx ui/*.ts",
     "test": "bun test",
     "demo": "bun demo.ts",
     "deploy": "executor apps deploy --host https://api.executor.sh --files ."

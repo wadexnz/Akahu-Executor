@@ -1,7 +1,7 @@
 import { array, boolean, mutation, number, object, query, router, string, type SqlReader } from "apps";
 import { RULE_KINDS, type Decision, type Flow, type Rule, type RuleMatch } from "../classify.js";
 import { resolveGroup } from "../categories.js";
-import { Budget } from "../schemas.js";
+import { Budget, Match, NoteOut, RemovedOut, RuleOut, TagOut, UntagOut } from "../schemas.js";
 import type { Ctx, WriteCtx } from "./context.js";
 
 // Every row belongs to the caller's Akahu connection in Executor. One app database serves
@@ -80,14 +80,12 @@ export function loadBudgets(sql: SqlReader, who: string) {
 	).toArray().map((b) => ({ group: b.category_group, currency: b.currency, monthly_amount: b.monthly_amount }));
 }
 
-export const Match = object({ description: string().optional(), merchant: string().optional(), other_account: string().optional(), account_id: string().optional(), direction: string().optional() });
-const RuleOut = object({ id: string(), kind: string(), match: Match, reason: string().optional() });
-const setNote = mutation(
+export const setNote = mutation(
 	{
 		title: "Set a transaction note",
 		description: `Save a private note on one settled transaction (trans_...), replacing any earlier note; an empty note deletes it. Notes are stored in this app, never sent to Akahu, and appear on the transaction in transactions.search, get and getMany. Up to ${MAX_NOTE} characters.`,
 		input: object({ transaction_id: string({ minLength: 1 }), note: string() }),
-		output: object({ transaction_id: string(), note: string().optional(), deleted: boolean() }),
+		output: NoteOut,
 		annotations: { ...LOCAL, destructiveHint: true },
 	},
 	async (ctx: WriteCtx, { transaction_id, note }) => {
@@ -105,12 +103,12 @@ const setNote = mutation(
 	},
 );
 
-const tag = mutation(
+export const tag = mutation(
 	{
 		title: "Tag transactions",
 		description: `Add one tag (case-insensitive, up to ${MAX_TAG} characters, such as "tax 2026" or "work expense") to up to ${MAX_IDS} settled transactions. Tags are stored in this app, appear on transactions, and filter transactions.search by tag.`,
 		input: object({ transaction_ids: array(string({ minLength: 1 })), tag: string() }),
-		output: object({ tag: string(), added: number() }),
+		output: TagOut,
 		annotations: LOCAL,
 	},
 	async (ctx: WriteCtx, input) => {
@@ -121,12 +119,12 @@ const tag = mutation(
 	},
 );
 
-const untag = mutation(
+export const untag = mutation(
 	{
 		title: "Remove a tag",
 		description: "Remove one tag from the given transactions.",
 		input: object({ transaction_ids: array(string({ minLength: 1 })), tag: string() }),
-		output: object({ tag: string(), removed: number() }),
+		output: UntagOut,
 		annotations: { ...LOCAL, destructiveHint: true },
 	},
 	async (ctx: WriteCtx, input) => {
@@ -153,7 +151,7 @@ const listTags = query(
 	}),
 );
 
-const addRule = mutation(
+export const addRule = mutation(
 	{
 		title: "Add an insights rule",
 		description: `Set the flow of matching transactions, ahead of the automatic classification (as the mobile app's classification rules do). kind spending, income, transfer or saving: for example transfer for a credit card repayment to a card Akahu does not see, saving for a savings app, income for a refund pattern; kind exclude: leave matches out of every insight (for example a one-off house deposit). match needs at least one of description, merchant, other_account (case-insensitive substrings; account numbers ignore dashes), account_id (exact) and optionally direction (debit or credit). The first matching rule wins; the user's review decisions (review.decide) win over rules. Check a rule with review.previewRule first. Rules decide the flow shown by transactions.search, get and getMany and used by summary's flow filter, insights.cashflow, recurring, largeOrUnusual, budgetStatus and monitor.check; the insights report how many rows each rule matched. Only add a rule the user asked for. At most ${MAX_RULES} rules.`,
@@ -172,17 +170,17 @@ const addRule = mutation(
 	},
 );
 
-const listRules = query(
+export const listRules = query(
 	{ title: "List insights rules", description: "The user's insights rules, oldest (highest priority) first.", input: object({}), output: array(RuleOut), annotations: LOCAL_READ },
 	async (ctx: Ctx) => loadRules(ctx.sql, owner(ctx)),
 );
 
-const removeRule = mutation(
+export const removeRule = mutation(
 	{
 		title: "Remove an insights rule",
 		description: "Delete one rule by id (rule_...).",
 		input: object({ rule_id: string({ minLength: 1 }) }),
-		output: object({ removed: boolean() }),
+		output: RemovedOut,
 		annotations: { ...LOCAL, destructiveHint: true },
 	},
 	async (ctx: WriteCtx, { rule_id }) => ({ removed: ctx.sql.exec("DELETE FROM rules WHERE owner = ? AND id = ?", owner(ctx), rule_id).rowsWritten > 0 }),
