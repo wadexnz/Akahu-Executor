@@ -132,3 +132,46 @@ export const CompareOut = object({
 	heuristic: object({ rule: string(), baseline_median: json(), threshold: json(), baseline_evidence_ids: array(string()), status: string() }),
 	unusual_debits: array(object({ id: string(), account_id: string(), date: string(), description: string(), debit: number(), type: string(), reason: string() })),
 });
+
+// Shapes the dashboard (ui/) reads as well as agents. Keep this module free of server code.
+export const RulesApplied = array(object({ rule_id: string(), count: number() }));
+export const Currencies = array(string());
+export const RecurringOut = object({
+	period: Interval,
+	payments: array(object({
+		payee: string(), currency: string(), cadence: string(), interval_days: number(), occurrences: number(),
+		typical_amount: number(), min_amount: number(), max_amount: number(), amount_varies: boolean(),
+		first_date: string(), last_date: string(), next_expected: string().optional(), status: string(),
+		monthly_equivalent: number(), category: string().optional(), evidence_ids: array(string()),
+	})),
+	totals: array(object({ currency: string(), active_count: number(), active_monthly_equivalent: number() })),
+	rules_applied: RulesApplied,
+	unknown_currency_transaction_ids: Currencies,
+});
+export const CashflowOut = object({
+	period: Interval,
+	currencies: array(object({
+		currency: string(),
+		months: array(object({ month: string(), partial: boolean(), income: number(), outgoings: number(), net: number(), transfers_left_out: number(), excluded_by_rules: number() })),
+		total: object({ income: number(), outgoings: number(), net: number() }),
+	})),
+	rules_applied: RulesApplied,
+	unknown_currency_transaction_ids: Currencies,
+});
+export const BudgetStatusOut = object({
+	month: string(), period: Interval, month_elapsed_percent: number(),
+	budgets: array(object({ group: string(), currency: string(), budget: number(), spent: number(), remaining: number(), percent_used: number() })),
+	unbudgeted: array(object({ group: string(), currency: string(), spent: number() })),
+	rules_applied: RulesApplied,
+	unknown_currency_transaction_ids: Currencies,
+});
+export const Budget = object({ group: string(), currency: string(), monthly_amount: number() });
+export const Alert = object({
+	id: string(), kind: string(), message: string(), created_at: string(), acknowledged: boolean(),
+	account_id: string().optional(), transaction_id: string().optional(),
+});
+export const BalanceHistoryOut = object({
+	from: string(), to: string(),
+	accounts: array(object({ account_id: string(), currency: string(), snapshots: array(object({ day: string(), current: number(), available: number() })) })),
+	totals: array(object({ currency: string(), days: array(object({ day: string(), current: number(), accounts_counted: number() })) })),
+});

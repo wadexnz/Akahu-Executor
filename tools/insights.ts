@@ -4,7 +4,7 @@ import {
 } from "../analysis.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { compareInsights } from "../compare.js";
-import { CompareInput, CompareOut, Interval } from "../schemas.js";
+import { BudgetStatusOut, CashflowOut, CompareInput, CompareOut, Currencies, Interval, RecurringOut, RulesApplied } from "../schemas.js";
 import { client, READ, type Ctx } from "./context.js";
 import { loadBudgets, loadRules, owner } from "./memory.js";
 
@@ -90,26 +90,13 @@ function instant(value: string, name: string) {
 }
 
 const monthsBack = (now: number, months: number) => new Date(now - months * 30.44 * 864e5).toISOString();
-const RulesApplied = array(object({ rule_id: string(), count: number() }));
-const Currencies = array(string());
 
-const recurring = query(
+export const recurring = query(
 	{
 		title: "Find recurring payments",
 		description: "Subscriptions, bills and other regular debits found in settled history (default the last 13 months): debits to the same merchant (or the same description without numbers) in the same currency on a weekly, fortnightly, monthly, quarterly or yearly cadence, with at least min_occurrences (default 3) payment days. Each has its typical amount, next expected date (active ones), status (active or lapsed), a monthly equivalent and evidence ids. Money moved between the user's own accounts and rows matched by the user's exclude or transfer rules are left out. totals sums active monthly equivalents per currency.",
 		input: object({ months: number().default(13), account_id: string().optional(), min_occurrences: number().default(3) }),
-		output: object({
-			period: Interval,
-			payments: array(object({
-				payee: string(), currency: string(), cadence: string(), interval_days: number(), occurrences: number(),
-				typical_amount: number(), min_amount: number(), max_amount: number(), amount_varies: boolean(),
-				first_date: string(), last_date: string(), next_expected: string().optional(), status: string(),
-				monthly_equivalent: number(), category: string().optional(), evidence_ids: array(string()),
-			})),
-			totals: array(object({ currency: string(), active_count: number(), active_monthly_equivalent: number() })),
-			rules_applied: RulesApplied,
-			unknown_currency_transaction_ids: Currencies,
-		}),
+		output: RecurringOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
@@ -131,21 +118,12 @@ const recurring = query(
 	},
 );
 
-const cashflow = query(
+export const cashflow = query(
 	{
 		title: "Monthly cash flow",
 		description: "Money in and out per NZ calendar month (Pacific/Auckland), per currency, for the last `months` months including the current, partial one (default 6). Money moved between the user's own accounts is left out: a debit and a credit of exactly the same amount in two of their accounts within 3 days are paired, and the user's transfer rules catch the rest (for example credit card repayments to a card Akahu does not see). Rows matched by exclude rules are left out too. Optional account_ids limits the view to those accounts; a transfer to an account outside them then counts as money out. Each month reports how many rows were left out.",
 		input: object({ months: number().default(6), account_ids: array(string({ minLength: 1 })).optional() }),
-		output: object({
-			period: Interval,
-			currencies: array(object({
-				currency: string(),
-				months: array(object({ month: string(), partial: boolean(), income: number(), outgoings: number(), net: number(), transfers_left_out: number(), excluded_by_rules: number() })),
-				total: object({ income: number(), outgoings: number(), net: number() }),
-			})),
-			rules_applied: RulesApplied,
-			unknown_currency_transaction_ids: Currencies,
-		}),
+		output: CashflowOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
@@ -268,18 +246,12 @@ const largeOrUnusual = query(
 	},
 );
 
-const budgetStatus = query(
+export const budgetStatus = query(
 	{
 		title: "Budget status",
 		description: "Spending against the user's monthly budgets (memory.setBudget) for one NZ calendar month (YYYY-MM, default the current month): per personal-finance group and currency, the budget, spent so far, remaining and percent used, beside how much of the month has passed. Also lists spending in groups without a budget. Spending is the sum of debits in the group; money moved between the user's own accounts and rows matched by the user's rules are left out.",
 		input: object({ month: string().optional() }),
-		output: object({
-			month: string(), period: Interval, month_elapsed_percent: number(),
-			budgets: array(object({ group: string(), currency: string(), budget: number(), spent: number(), remaining: number(), percent_used: number() })),
-			unbudgeted: array(object({ group: string(), currency: string(), spent: number() })),
-			rules_applied: RulesApplied,
-			unknown_currency_transaction_ids: Currencies,
-		}),
+		output: BudgetStatusOut,
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {

@@ -1,6 +1,7 @@
 import { array, boolean, mutation, number, object, query, router, string, type SqlReader } from "apps";
 import { RULE_KINDS, type Rule, type RuleMatch } from "../analysis.js";
 import { resolveGroup } from "../categories.js";
+import { Budget } from "../schemas.js";
 import type { Ctx, WriteCtx } from "./context.js";
 
 // Every row belongs to the caller's Akahu connection in Executor. One app database serves
@@ -58,8 +59,6 @@ export function loadBudgets(sql: SqlReader, who: string) {
 
 const Match = object({ description: string().optional(), merchant: string().optional(), other_account: string().optional(), account_id: string().optional(), direction: string().optional() });
 const RuleOut = object({ id: string(), kind: string(), match: Match, reason: string().optional() });
-const Budget = object({ group: string(), currency: string(), monthly_amount: number() });
-
 const setNote = mutation(
 	{
 		title: "Set a transaction note",
@@ -177,7 +176,7 @@ const removeRule = mutation(
 	async (ctx: WriteCtx, { rule_id }) => ({ removed: ctx.sql.exec("DELETE FROM rules WHERE owner = ? AND id = ?", owner(ctx), rule_id).rowsWritten > 0 }),
 );
 
-const setBudget = mutation(
+export const setBudget = mutation(
 	{
 		title: "Set a monthly budget",
 		description: "Set the monthly spending budget for one personal-finance group (see categories.list; such as Food or Lifestyle) in one currency (default NZD). monthly_amount is positive; 0 removes the budget. insights.budgetStatus compares spending with it.",

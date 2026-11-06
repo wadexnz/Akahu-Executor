@@ -24,7 +24,7 @@ function accountOut(a: Account) {
 	};
 }
 
-const listAccounts = query(
+export const listAccounts = query(
 	{
 		title: "List accounts",
 		description: "List connected NZ bank accounts with balances, status and transaction-feed availability.",

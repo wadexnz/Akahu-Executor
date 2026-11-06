@@ -236,6 +236,25 @@ Executor user schedule it starts paused: enable it in the app's **Schedules**
 tab. Each member who enables it gets their own copy, run with their own Akahu
 connection.
 
+## Monthly review dashboard
+
+The app also serves a private page in Executor (`ui/`, React and Tailwind),
+signed in with your Executor session. It reads only through the tools above,
+as you, with your own Akahu connection:
+
+- **Cashflow** from `insights.cashflow` for the last 6 months; click a month to
+  review it.
+- **Budgets** from `insights.budgetStatus` for that month, with a marker for how
+  much of the month has passed. Set or change a budget inline
+  (`memory.setBudget`; 0 removes it).
+- **Upcoming bills**: active `insights.recurring` payments expected in the next
+  14 days (predicted from past payments).
+- **Balances** from `accounts.list` with 30-day sparklines from
+  `monitor.balanceHistory`, and net worth per currency.
+- **Alerts** from `monitor.alerts`, with **Mark seen** (`monitor.acknowledge`).
+
+After deploying, `tools.executor.appUi.location` returns the page's URL.
+
 ## Layout
 
 | File | Contents |
@@ -244,12 +263,13 @@ connection.
 | `icon.ts` | The app icon |
 | `provider.ts` | The `Akahu Personal App` provider and its health check |
 | `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
-| `schemas.ts` | Akahu response decoders and agent-facing output shapes |
+| `schemas.ts` | Akahu response decoders and output shapes shared by the tools and the dashboard |
 | `compare.ts` | Pure period-comparison logic |
 | `analysis.ts` | Pure NZ-date, rule, transfer-pairing, recurring and unusual-debit logic |
 | `migrations/` | The app database schema for memory, balance snapshots and alerts |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
 | `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `monitor`, `identity`, `admin`) |
+| `ui/` | The monthly review dashboard; imports tool types only, plus `schemas.ts` |
 | `test-database.ts` | An in-memory SQLite app database for tests, with the real migrations |
 
 ## Develop and deploy
