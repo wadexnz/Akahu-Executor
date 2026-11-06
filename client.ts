@@ -13,14 +13,23 @@ function url(path: string, query: Record<string, string | undefined> = {}) {
 	return u.toString();
 }
 
+// A 400: Akahu refused the request's input, such as a malformed id.
+export class AkahuRejected extends Error {}
+
 // Akahu documents 401 for a revoked token, 403 for a missing app id, scope or IP
-// allow-list, and asks clients to back off on 429. Bodies are never forwarded.
+// allow-list, and asks clients to back off on 429. Their bodies are never forwarded;
+// a 400's `{ success: false, message }` is, because it says which input was wrong.
 export async function decode<T>(r: Response, schema: Schema<T, boolean>): Promise<T> {
 	const reason = r.status === 401 ? "unauthorized" : r.status === 403 ? "rejected" : r.status === 429 ? "rate_limited" :
 		r.status >= 500 ? "unavailable" : undefined;
 	if (reason) {
 		await r.body?.cancel();
 		throw new ProviderError({ reason, status: r.status });
+	}
+	if (r.status === 400) {
+		const body: unknown = await r.json().catch(() => undefined);
+		const message = typeof body === "object" && body !== null && "message" in body && typeof body.message === "string" ? body.message.slice(0, 300) : "no reason given";
+		throw new AkahuRejected(`Akahu rejected the request (400): ${message}`);
 	}
 	return decodeJson(r, schema);
 }

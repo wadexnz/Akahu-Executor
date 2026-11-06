@@ -119,7 +119,13 @@ const account = (id: string, extra: object = {}) => ({
 });
 
 test("batch lookup dedupes ids and reports the ones Akahu did not return", async () => {
-	const requests = akahu({ "POST /transactions/ids": ({ body }) => Response.json({ success: true, items: (body as string[]).filter((id) => id !== "trans_gone").map((id) => settled(id, -1, "Food")) }) });
+	const requests = akahu({ "POST /transactions/ids": ({ body }) => (body as string[]).includes("trans_bad")
+		? Response.json({ success: false, message: "Invalid transaction id" }, { status: 400 })
+		: Response.json({ success: true, items: (body as string[]).filter((id) => id !== "trans_gone").map((id) => settled(id, -1, "Food")) }) });
+	const rejected = await call("transactions.getMany", { transaction_ids: ["trans_a", "trans_bad"] });
+	expect(rejected).toMatchObject({ ok: false });
+	expect(JSON.stringify(rejected)).toContain("Akahu rejected the request (400): Invalid transaction id. One malformed id makes Akahu reject the whole batch");
+	requests.length = 0;
 	const result = await call("transactions.getMany", { transaction_ids: ["trans_a", "trans_gone", "trans_a"] });
 	expect(requests).toEqual([{ method: "POST", path: "/transactions/ids", body: ["trans_a", "trans_gone"] }]);
 	expect(result.value.missing_ids).toEqual(["trans_gone"]);

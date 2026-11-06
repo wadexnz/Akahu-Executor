@@ -1,6 +1,6 @@
 import { array, boolean, number, object, query, router, string } from "apps";
 import { resolveGroup } from "../categories.js";
-import { fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
+import { AkahuRejected, fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
 import { PendingTransaction, Transaction, Txn } from "../schemas.js";
 import { client, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
 
@@ -95,7 +95,7 @@ const MAX_IDS = 100;
 const getManyTransactions = query(
 	{
 		title: "Get transactions by id",
-		description: `Fetch up to ${MAX_IDS} settled transactions by id (trans_...) in one request, for example the evidence ids in an insights report. missing_ids lists ids Akahu did not return: the transaction may have been deleted, or re-issued under a new id when the bank changed it or the account moved to official open banking.`,
+		description: `Fetch up to ${MAX_IDS} settled transactions by id (trans_...) in one request, for example the evidence ids in an insights report. missing_ids lists ids Akahu did not return: the transaction may have been deleted, or re-issued under a new id when the bank changed it or the account moved to official open banking. A malformed id (not a complete trans_... id) fails the whole request.`,
 		input: object({ transaction_ids: array(string({ minLength: 1 })) }),
 		output: object({ transactions: array(Txn), missing_ids: array(string()) }),
 		annotations: READ,
@@ -103,7 +103,10 @@ const getManyTransactions = query(
 	async (ctx: Ctx, { transaction_ids }) => {
 		const ids = [...new Set(transaction_ids)];
 		if (ids.length === 0 || ids.length > MAX_IDS) throw new Error(`transaction_ids must contain 1 to ${MAX_IDS} distinct ids`);
-		const { items } = await postRead(client(ctx), "/transactions/ids", ids, object({ items: array(Transaction) }));
+		const { items } = await postRead(client(ctx), "/transactions/ids", ids, object({ items: array(Transaction) })).catch((error: unknown) => {
+			if (!(error instanceof AkahuRejected)) throw error;
+			throw new Error(`${error.message}. One malformed id makes Akahu reject the whole batch: use complete trans_... ids exactly as transactions.search returned them.`);
+		});
 		const found = new Set(items.map((t) => t._id));
 		return { transactions: items.map(txn), missing_ids: ids.filter((id) => !found.has(id)) };
 	},

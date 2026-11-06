@@ -40,6 +40,10 @@ test("rate-limited reads back off and retry; writes and other failures are not r
 		expect(failed.requests).toHaveLength(1);
 	}
 	await expect(getItems(akahu(status(404)).c, "/me", User)).rejects.toMatchObject({ _tag: "ResponseStatusError", status: 404 });
+	// A 400 carries Akahu's reason, which names the bad input; it is not retried.
+	const bad = akahu(status(400));
+	await expect(getItems(bad.c, "/me", User)).rejects.toThrow("Akahu rejected the request (400): synthetic");
+	expect(bad.requests).toHaveLength(1);
 
 	// Jittered exponential delays stay within 50–100% of 250 ms × 2^attempt; Retry-After wins but is capped.
 	expect([retryDelay(0, null, () => 0), retryDelay(0, null, () => 1), retryDelay(2, null, () => 0), retryDelay(2, null, () => 1)]).toEqual([125, 250, 500, 1000]);
