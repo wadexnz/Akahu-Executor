@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { createAppHandler, hostContext } from "apps/host";
 import type { HostRequest } from "apps/contracts";
 import app from "./index.js";
+import { testDatabase } from "./test-database.js";
 import type { Account } from "./schemas.js";
 import { demoAnswer, demoScope, syntheticReview } from "./demo.js";
 
@@ -14,12 +15,12 @@ test("transaction tools keep currencies separate through the public host boundar
 	const credentials = declaration.value.accounts.user.akahu.definition.auth.personalApp.fields;
 	expect(Object.keys(credentials.properties)).toEqual(["App ID Token", "User Access Token"]);
 	expect(credentials.required).toEqual(["App ID Token", "User Access Token"]);
-	const context = hostContext({ app: {}, user: { akahu: {
+	const context = { ...hostContext({ app: {}, user: { akahu: {
 		id: "acc_synthetic",
 		provider: declaration.value.accounts.user.akahu.definition,
 		method: "personalApp",
 		fields: { "App ID Token": "synthetic-app", "User Access Token": "synthetic-user" },
-	} } });
+	} } }), ...testDatabase().context };
 	const row = (id: string, account: string, amount: number) => ({
 		_id: id, _account: account, amount, date: "2026-10-01T00:00:00Z",
 		description: "Synthetic purchase", type: amount < 0 ? "DEBIT" : "CREDIT",
@@ -261,8 +262,9 @@ test("guided review rejects invalid selections and intervals before reading tran
 	expect(excluded.transactionRequests).toEqual([]);
 });
 
-test("the packaged review skill and example are discoverable through the host", async () => {
-	const files = await Promise.all(["skills/reviewing-spending/SKILL.md", "skills/reviewing-spending/references/demo.md"].map(async path => ({
+test("the packaged skills and the review example are discoverable through the host", async () => {
+	const skills = ["reviewing-spending", "finding-subscriptions", "monthly-checkin", "akahu-data-limits"];
+	const files = await Promise.all([...skills.map((s) => `skills/${s}/SKILL.md`), "skills/reviewing-spending/references/demo.md"].map(async path => ({
 		path, content: await Bun.file(new URL(path, import.meta.url)).text(),
 	})));
 	const handle = createAppHandler(app);
@@ -278,4 +280,6 @@ test("the packaged review skill and example are discoverable through the host", 
 			expect.objectContaining({ path: "references/demo.md" }),
 		]),
 	})]));
+	// Packaged skills plus the generated per-router instruction skills.
+	expect(result.value.map((s: { name: string }) => s.name)).toEqual(expect.arrayContaining(skills));
 });

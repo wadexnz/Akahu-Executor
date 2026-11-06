@@ -5,6 +5,7 @@ import type { Account, PendingTransaction, Transaction } from "../schemas.js";
 
 export const requirements = { user: { accounts: { akahu } } };
 export type Ctx = QueryContext<typeof requirements> | MutationContext<typeof requirements>;
+export type WriteCtx = MutationContext<typeof requirements>;
 
 export function client(ctx: Ctx): Akahu {
 	const account = ctx.user.accounts.akahu;
@@ -34,7 +35,7 @@ export function txn(t: Transaction | PendingTransaction) {
 	};
 }
 
-export const round = (n: number) => Math.round(n * 100) / 100;
+export { round } from "../analysis.js";
 
 // Account currency is the unit of the settled amount, not the original FX purchase.
 // Missing metadata must never silently turn an amount into NZD (or a mixed total).

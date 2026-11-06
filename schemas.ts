@@ -85,6 +85,8 @@ export const Txn = object({
 	other_account: string().optional(),
 	card_suffix: string().optional(),
 	fx: object({ amount: number(), currency: string(), rate: number() }).optional(),
+	note: string().optional(),
+	tags: array(string()).optional(),
 });
 export const AccountOut = object({
 	id: string(),

@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createAppHandler, hostContext } from "apps/host";
 import type { HostRequest } from "apps/contracts";
 import app from "./index.js";
+import { testDatabase } from "./test-database.js";
 
 // Calls tools through Executor's host boundary against a synthetic Akahu that
 // answers only the routes a test declares and records every request.
@@ -13,6 +14,7 @@ const user = { akahu: {
 	id: "acc_synthetic", provider: declaration.value.accounts.user.akahu.definition, method: "personalApp",
 	fields: { "App ID Token": "synthetic-app", "User Access Token": "synthetic-user" },
 } };
+const database = testDatabase();
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
@@ -34,7 +36,7 @@ function akahu(routes: Record<string, Route>) {
 }
 
 async function call(tool: string, input: object = {}, approval?: unknown) {
-	return (await handle(request({ operation: "call", tool, input: JSON.parse(JSON.stringify(input)) }), hostContext({ app: {}, user }, approval))).json();
+	return (await handle(request({ operation: "call", tool, input: JSON.parse(JSON.stringify(input)) }), { ...hostContext({ app: {}, user }, approval), ...database.context })).json();
 }
 
 const party = {

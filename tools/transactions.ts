@@ -1,14 +1,25 @@
 import { array, boolean, number, object, query, router, string } from "apps";
+import { groupOf } from "../analysis.js";
 import { resolveGroup } from "../categories.js";
 import { AkahuRejected, fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
 import { PendingTransaction, Transaction, Txn } from "../schemas.js";
 import { client, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
+import { annotationsFor, owner, taggedIds } from "./memory.js";
+
+// Settled rows with the user's own notes and tags from this app's memory.
+function annotated(ctx: Ctx, rows: readonly Transaction[]) {
+	const memo = annotationsFor(ctx.sql, owner(ctx), rows.map((t) => t._id));
+	return rows.map((t) => {
+		const m = memo.get(t._id);
+		return { ...txn(t), ...(m?.note !== undefined && { note: m.note }), ...(m?.tags.length && { tags: m.tags }) };
+	});
+}
 
 const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
-			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable.",
+			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Rows carry the user's note and tags when they have any.",
 		input: object({
 			start: string().optional(),
 			end: string().optional(),
@@ -18,6 +29,7 @@ const getTransactions = query(
 			merchant: string().optional(),
 			description: string().optional(),
 			group: string().optional(),
+			tag: string().optional(),
 			min_amount: number().optional(),
 			max_amount: number().optional(),
 			limit: number().default(500),
@@ -32,6 +44,7 @@ const getTransactions = query(
 	async (ctx: Ctx, i) => {
 		if (!Number.isInteger(i.limit) || i.limit < 1) throw new Error("limit must be a positive integer");
 		const group = resolveGroup(i.group);
+		const tagged = i.tag === undefined ? undefined : taggedIds(ctx.sql, owner(ctx), i.tag);
 		const has = (value: string | undefined, needle: string | undefined) =>
 			needle === undefined || (value ?? "").toLowerCase().includes(needle.toLowerCase());
 		const rows = await fetchTransactions(
@@ -46,6 +59,7 @@ const getTransactions = query(
 					(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
 					has(t.description, i.description) &&
 					(group === undefined || groupOf(t) === group) &&
+					(tagged === undefined || tagged.has(t._id)) &&
 					(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
 					(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount),
 			},
@@ -57,12 +71,10 @@ const getTransactions = query(
 			truncated: rows.length > i.limit,
 			currencies: groups.map(([currency, rows]) => ({ currency, net_total: round(rows.reduce((sum, t) => sum + t.amount, 0)) })),
 			unknown_currency_transaction_ids,
-			transactions: shown.map(txn),
+			transactions: annotated(ctx, shown),
 		};
 	},
 );
-
-const groupOf = (t: Transaction) => t.category?.groups?.personal_finance?.name;
 
 const getTransaction = query(
 	{
@@ -73,7 +85,7 @@ const getTransaction = query(
 		annotations: READ,
 	},
 	async (ctx: Ctx, { transaction_id }) =>
-		txn(await getItem(client(ctx), `/transactions/${encodeURIComponent(transaction_id)}`, Transaction)),
+		annotated(ctx, [await getItem(client(ctx), `/transactions/${encodeURIComponent(transaction_id)}`, Transaction)])[0]!,
 );
 
 const getPendingTransactions = query(
@@ -108,7 +120,7 @@ const getManyTransactions = query(
 			throw new Error(`${error.message}. One malformed id makes Akahu reject the whole batch: use complete trans_... ids exactly as transactions.search returned them.`);
 		});
 		const found = new Set(items.map((t) => t._id));
-		return { transactions: items.map(txn), missing_ids: ids.filter((id) => !found.has(id)) };
+		return { transactions: annotated(ctx, items), missing_ids: ids.filter((id) => !found.has(id)) };
 	},
 );
 

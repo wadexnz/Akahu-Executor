@@ -23,13 +23,21 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `accounts.list` | Connected accounts and balances (cached 5 min) | |
 | `accounts.get` | One account, live | |
 | `accounts.freshness` | Sync ages per account, with warnings for INACTIVE, never-synced or stale data | |
-| `transactions.search`, `transactions.get` | Settled transactions | |
+| `transactions.search`, `transactions.get` | Settled transactions, with your notes and tags; search can filter by tag | |
 | `transactions.getMany` | Up to 100 transactions by id, reporting ids Akahu no longer has | |
 | `transactions.pending` | Pending transactions, for all accounts or one | |
 | `transactions.summary` | Totals by category, personal-finance group, merchant or type | |
 | `categories.list` | The bundled NZFCC categories and groups | |
 | `insights.compare` | Compare two periods (see below) | |
 | `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report | |
+| `insights.recurring` | Subscriptions and regular bills, with cadence, next expected date and monthly cost | |
+| `insights.cashflow` | Money in and out per NZ calendar month, without transfers between your own accounts | |
+| `insights.merchantHistory` | Everything paid to or received from one merchant, by month | |
+| `insights.largeOrUnusual` | Large debits to a new payee, or at least 3 times a payee's usual amount | |
+| `insights.budgetStatus` | Spending against your monthly budgets for one month | |
+| `memory.setNote`, `memory.tag`, `memory.untag`, `memory.listTags` | Private notes and tags on transactions | |
+| `memory.addRule`, `memory.listRules`, `memory.removeRule` | Rules that mark transactions as transfers or leave them out of insights | |
+| `memory.setBudget`, `memory.listBudgets` | Monthly budgets per personal-finance group | |
 | `identity.me` | The connected Akahu user | |
 | `identity.parties` | Identity data the banks hold; only the requested fields | Every call |
 | `identity.verifyName` | Check a name against holder and party names | Every call |
@@ -37,7 +45,8 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `admin.reportEnrichmentIssue` | Report a wrong merchant/category or a duplicate to Akahu | Every call |
 
 Only the two `admin` tools change anything at Akahu, and none can make payments
-(Personal Apps cannot). Each tool declares MCP annotations and an output schema.
+(Personal Apps cannot). The `memory` tools write only to this app's own
+database. Each tool declares MCP annotations and an output schema.
 An approval covers the exact arguments shown, so approving a name-only
 `identity.parties` call does not approve reading the IRD number.
 
@@ -164,6 +173,39 @@ failed account is excluded from both periods, and an unusual debit turns out to
 be a transfer. The automated tests exercise the same fixture. This is not a live
 MCP session or proof that a particular client renders the form correctly.
 
+## Insights
+
+`recurring`, `cashflow`, `largeOrUnusual` and `budgetStatus` leave out money
+moving between your own accounts. A debit and a credit of exactly the same
+amount and currency, in two different connected accounts within 3 days, are
+paired as a transfer. Your rules catch transfers that pairing cannot see, such
+as repayments to a credit card that is not connected. They also leave out rows
+matched by `exclude` rules. Each result reports `rules_applied`, and `cashflow`
+counts the rows left out per month.
+
+- Months and payment days use NZ calendar dates (Pacific/Auckland), including
+  daylight-saving changes.
+- A payment is recurring when at least 3 payment days (`min_occurrences`) to the
+  same merchant fall on a weekly, fortnightly, monthly, quarterly or yearly cadence,
+  with at least 60% of the gaps fitting it. Without merchant enrichment, the
+  description without numbers stands in for the merchant.
+- `largeOrUnusual` is a review aid, not fraud detection.
+- `compare`, `reviewSpending`, `search` and `summary` do not apply rules or pairing.
+
+## Memory
+
+Notes, tags, rules and budgets are stored in the app's SQLite database
+(`migrations/`), which Executor keeps across versions. One database serves the
+whole Executor organisation, so every row is keyed by the caller's Executor
+account for their Akahu connection, and the tools only read and write the
+caller's rows. Nothing in memory is sent to Akahu. Notes and tags stay attached to
+a transaction id; if Akahu re-issues an id, they stay with the old one.
+
+The skills [`finding-subscriptions`](skills/finding-subscriptions/SKILL.md),
+[`monthly-checkin`](skills/monthly-checkin/SKILL.md) and
+[`akahu-data-limits`](skills/akahu-data-limits/SKILL.md) guide agents through
+these tools.
+
 ## Layout
 
 | File | Contents |
@@ -174,15 +216,18 @@ MCP session or proof that a particular client renders the form correctly.
 | `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
 | `schemas.ts` | Akahu response decoders and agent-facing output shapes |
 | `compare.ts` | Pure period-comparison logic |
+| `analysis.ts` | Pure NZ-date, rule, transfer-pairing, recurring and unusual-debit logic |
+| `migrations/` | The app database schema for memory |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
-| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `identity`, `admin`) |
+| `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `identity`, `admin`) |
+| `test-database.ts` | An in-memory SQLite app database for tests, with the real migrations |
 
 ## Develop and deploy
 
 ```sh
 npm install --no-package-lock
 bun run typecheck
-bun test          # uses a synthetic Akahu API, no real data
+bun test          # synthetic Akahu API and an in-memory database, no real data
 
 ```
 
