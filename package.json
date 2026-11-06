@@ -9,7 +9,7 @@
     "deploy": "executor apps deploy --host https://api.executor.sh --files ."
   },
   "dependencies": {
-    "apps": "0.0.1-beta.118"
+    "apps": "0.0.1-beta.120"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4"
