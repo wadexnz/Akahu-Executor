@@ -12,3 +12,4 @@ package-lock.json
 *.csv
 *.db
 credentials.json
+.amp/

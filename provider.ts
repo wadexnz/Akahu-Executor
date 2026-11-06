@@ -1,7 +1,6 @@
-import { bearer, decodeJson, defineProvider, header, object, secrets, string } from "apps";
+import { bearer, defineProvider, header, object, secrets, string } from "apps";
+import { API, decode } from "./client.js";
 import { User } from "./schemas.js";
-
-export const API = "https://api.akahu.io/v1";
 
 // Akahu Personal App credentials. Executor stores them; app code only ever holds
 // handles, which Executor's network swaps for the real values on requests to
@@ -18,7 +17,7 @@ export const akahu = defineProvider({
 	},
 	async health({ account, fetch, signal }) {
 		const response = await fetch(`${API}/me`, { signal, headers: account.headers() });
-		const { item } = await decodeJson(response, object({ item: User }));
+		const { item } = await decode(response, object({ item: User }));
 		const accountInfo = { externalId: item._id };
 		if (item.email) return { accountInfo: { ...accountInfo, email: item.email } };
 		return { accountInfo };

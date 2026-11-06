@@ -57,6 +57,23 @@ exclusive, so the app requests one millisecond earlier; otherwise transactions
 dated exactly at the start (often midnight, since many banks only supply a
 date) would be dropped.
 
+## Freshness, caching and rate limits
+
+- Account lists are cached for 5 minutes and settled transaction pages for 15,
+  per connected Akahu account, using Executor's app cache. Pending transactions,
+  single transactions and `identity.me` are always fetched live.
+- `admin.refresh` starts a new cache generation, so nothing cached before the
+  refresh request is served afterwards. Akahu still needs time to sync the bank.
+- Reads that Akahu rate-limits (429) are retried up to three times with jittered
+  exponential backoff, or after `Retry-After` (capped at 10 seconds). A
+  rate-limited refresh is reported, not retried.
+- Akahu failures surface as Executor `ProviderError`s: 401 `unauthorized`
+  (revoked or rotated token), 403 `rejected` (app ID, permissions or IP
+  allow-list), 429 `rate_limited` and 5xx `unavailable`. Response bodies are
+  never passed on.
+- If the cache is unavailable (as in the local test host), tools read Akahu
+  directly instead of failing.
+
 ## Comparing two periods
 
 `insights.compare` takes explicit account IDs and two non-overlapping
@@ -130,9 +147,10 @@ MCP session or proof that a particular client renders the form correctly.
 
 | File | Contents |
 | --- | --- |
-| `index.ts` | `defineApp`: requirements and the root router |
+| `index.ts` | `defineApp`: requirements, icon and the root router |
+| `icon.ts` | The app icon |
 | `provider.ts` | The `Akahu Personal App` provider and its health check |
-| `client.ts` | HTTP helpers and transaction paging |
+| `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
 | `schemas.ts` | Akahu response decoders and agent-facing output shapes |
 | `compare.ts` | Pure period-comparison logic |
 | `tools/*.ts` | One router per group (`accounts`, `transactions`, `insights`, `identity`, `admin`) |

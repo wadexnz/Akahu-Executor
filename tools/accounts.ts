@@ -1,6 +1,6 @@
 import { array, query, router } from "apps";
-import { getItems } from "../client.js";
-import { Account, AccountOut, Empty } from "../schemas.js";
+import { fetchAccounts } from "../client.js";
+import { AccountOut, Empty } from "../schemas.js";
 import { client, READ, type Ctx } from "./context.js";
 
 const listAccounts = query(
@@ -12,7 +12,7 @@ const listAccounts = query(
 		annotations: READ,
 	},
 	async (ctx: Ctx) =>
-		(await getItems(client(ctx), "/accounts", Account)).map((a) => ({
+		(await fetchAccounts(client(ctx))).map((a) => ({
 			id: a._id,
 			bank: a.connection.name,
 			name: a.name,
@@ -27,4 +27,8 @@ const listAccounts = query(
 		})),
 );
 
-export const accounts = router({ list: listAccounts }, { title: "Accounts", description: "Connected bank accounts, balances and feed status." });
+export const accounts = router({ list: listAccounts }, {
+	title: "Accounts",
+	description: "Connected bank accounts, balances and feed status.",
+	instructions: "Balances are in each account's own currency; a negative balance is money owed (credit cards, loans). refreshed shows when Akahu last synced each part of the account, usually daily. An INACTIVE account can no longer sync but keeps its cached history. Results may be up to 5 minutes old.",
+});

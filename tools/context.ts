@@ -7,7 +7,8 @@ export const requirements = { user: { accounts: { akahu } } };
 export type Ctx = QueryContext<typeof requirements> | MutationContext<typeof requirements>;
 
 export function client(ctx: Ctx): Akahu {
-	return { fetch: ctx.fetch, headers: ctx.user.accounts.akahu.headers(), signal: ctx.signal };
+	const account = ctx.user.accounts.akahu;
+	return { fetch: ctx.fetch, headers: account.headers(), signal: ctx.signal, cache: ctx.cache.forAccount(account) };
 }
 
 // Compact transaction for agents: Akahu enrichment flattened, absent fields omitted.
@@ -36,7 +37,7 @@ export const round = (n: number) => Math.round(n * 100) / 100;
 
 // Account currency is the unit of the settled amount, not the original FX purchase.
 // Missing metadata must never silently turn an amount into NZD (or a mixed total).
-export function groupCurrencies(rows: Transaction[], accounts: Account[]) {
+export function groupCurrencies(rows: Transaction[], accounts: readonly Account[]) {
 	const byId = new Map(accounts.map(a => [a._id, a.balance?.currency]));
 	const groups = new Map<string, Transaction[]>();
 	const unknown_currency_transaction_ids: string[] = [];

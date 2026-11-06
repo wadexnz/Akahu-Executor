@@ -1,5 +1,5 @@
-import { fetchTransactions, getItems, type Akahu } from "./client.js";
-import { Account, type Transaction } from "./schemas.js";
+import { fetchAccounts, fetchTransactions, type Akahu } from "./client.js";
+import type { Transaction } from "./schemas.js";
 
 export type Interval = { start: string; end: string };
 const round = (n: number) => Math.round(n * 100) / 100;
@@ -76,7 +76,7 @@ export async function compareInsights(client: Akahu, { account_ids, baseline, co
 	const c = Date.parse(comparison.start), d = Date.parse(comparison.end);
 	if (!(a < b && c < d)) throw new Error("Each interval must have start before end.");
 	if (!(b < c || d < a)) throw new Error("Inclusive intervals must not overlap or share an endpoint.");
-	const accounts = await getItems(client, "/accounts", Account);
+	const accounts = await fetchAccounts(client);
 	const included: string[] = [];
 	const excluded: { account_id: string; reason: string }[] = [];
 	const before: Transaction[] = [], after: Transaction[] = [];

@@ -1,7 +1,7 @@
 import { array, object, query, router, string, type ElicitationResponse, type FormElicitation } from "apps";
-import { getItems } from "../client.js";
+import { fetchAccounts } from "../client.js";
 import { compareInsights } from "../compare.js";
-import { Account, CompareInput, CompareOut, Interval } from "../schemas.js";
+import { CompareInput, CompareOut, Interval } from "../schemas.js";
 import { client, READ, type Ctx } from "./context.js";
 
 const compareTransactionInsights = query(
@@ -28,7 +28,7 @@ const reviewSpending = query(
 	async (ctx: Ctx, input) => {
 		const properties: Record<string, FormElicitation["requestedSchema"]["properties"][string]> = {};
 		if (input.account_ids === undefined) {
-			const accounts = (await getItems(client(ctx), "/accounts", Account))
+			const accounts = (await fetchAccounts(client(ctx)))
 				.filter(a => a.balance?.currency === "NZD" && a.attributes.includes("TRANSACTIONS"));
 			if (!accounts.length) throw new Error("No NZD accounts with a transaction feed are available for review. No transactions read.");
 			properties.account_ids = {
@@ -67,5 +67,9 @@ const reviewSpending = query(
 
 export const insights = router(
 	{ compare: compareTransactionInsights, reviewSpending },
-	{ title: "Insights", description: "Evidence-backed comparisons of settled NZD debits between two periods." },
+	{
+		title: "Insights",
+		description: "Evidence-backed comparisons of settled NZD debits between two periods.",
+		instructions: "Read the reviewing-spending skill before reviewing spending. Debits include transfers between the user's own accounts. Check coverage before quoting totals: a failed or excluded account is never counted as zero.",
+	},
 );

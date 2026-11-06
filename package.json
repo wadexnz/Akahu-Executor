@@ -1,7 +1,11 @@
 {
   "name": "akahu",
+  "description": "NZ bank accounts and transactions for agents through an Akahu Personal App.",
   "private": true,
   "type": "module",
+  "executor": {
+    "title": "Akahu"
+  },
   "scripts": {
     "typecheck": "npx -y -p typescript@7 tsc --ignoreConfig --noEmit --strict --skipLibCheck --module nodenext --moduleResolution nodenext --target es2022 --types bun index.ts demo.ts *.test.ts",
     "test": "bun test",

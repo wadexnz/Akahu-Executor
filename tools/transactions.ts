@@ -1,6 +1,6 @@
 import { array, boolean, number, object, query, router, string } from "apps";
-import { fetchTransactions, getItem, getItems } from "../client.js";
-import { Account, Empty, PendingTransaction, Transaction, Txn } from "../schemas.js";
+import { fetchTransactions, getItem, getItems, fetchAccounts } from "../client.js";
+import { Empty, PendingTransaction, Transaction, Txn } from "../schemas.js";
 import { client, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
 
 const getTransactions = query(
@@ -47,7 +47,7 @@ const getTransactions = query(
 			},
 		);
 		const shown = rows.slice(0, i.limit);
-		const { groups, unknown_currency_transaction_ids } = groupCurrencies(shown, await getItems(client(ctx), "/accounts", Account));
+		const { groups, unknown_currency_transaction_ids } = groupCurrencies(shown, await fetchAccounts(client(ctx)));
 		return {
 			count: shown.length,
 			truncated: rows.length > i.limit,
@@ -112,7 +112,7 @@ const getTransactionSummary = query(
 			{ start: i.start, end: i.end },
 			{ accountId: i.account_id, filter: i.spending_only ? (t) => t.amount < 0 : undefined },
 		);
-		const { groups: currencies, unknown_currency_transaction_ids } = groupCurrencies(rows, await getItems(client(ctx), "/accounts", Account));
+		const { groups: currencies, unknown_currency_transaction_ids } = groupCurrencies(rows, await fetchAccounts(client(ctx)));
 		return {
 			group_by: i.group_by,
 			transaction_count: rows.length,
@@ -143,5 +143,9 @@ const getTransactionSummary = query(
 
 export const transactions = router(
 	{ search: getTransactions, get: getTransaction, pending: getPendingTransactions, summary: getTransactionSummary },
-	{ title: "Transactions", description: "Settled and pending transactions, filtered lists and grouped totals." },
+	{
+		title: "Transactions",
+		description: "Settled and pending transactions, filtered lists and grouped totals.",
+		instructions: "start and end are inclusive ISO 8601 timestamps. Personal Apps see up to two years of history from when the app was created, and some banks keep less. Many banks only supply a date, so times are often midnight. Pending transactions have no id, merchant or category and can change before they settle. Settled results may be up to 15 minutes old.",
+	},
 );
