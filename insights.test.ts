@@ -22,32 +22,34 @@ const accounts: Account[] = [
 ].map(a => ({ ...a, name: a._id, type: "CHECKING", status: a.status ?? "ACTIVE", connection: { name: "Synthetic Bank" } }));
 
 function page(account: string, q: URLSearchParams) {
-	const start = q.get("start"), end = q.get("end"), cursor = q.get("cursor");
-	const baseline = start === "2026-01-01T00:00:00Z";
-	if (start !== (baseline ? "2026-01-01T00:00:00Z" : "2026-02-01T00:00:00Z") ||
+	const end = q.get("end"), cursor = q.get("cursor");
+	const baseline = end === "2026-01-02T00:00:00Z";
+	// Akahu's start is exclusive, so an inclusive period start is requested 1 ms earlier.
+	const start = baseline ? "2026-01-01T00:00:00Z" : "2026-02-01T00:00:00Z";
+	if (q.get("start") !== (baseline ? "2025-12-31T23:59:59.999Z" : "2026-01-31T23:59:59.999Z") ||
 		end !== (baseline ? "2026-01-02T00:00:00Z" : "2026-02-03T00:00:00Z")) throw new Error("Lost date bounds on pagination");
 	if (account === "acc_failed") {
-		if (baseline) return Response.json({ success: true, items: [row("trans_failed", -9999, start!, true, account)], cursor: { next: null } });
+		if (baseline) return Response.json({ success: true, items: [row("trans_failed", -9999, start, true, account)], cursor: { next: null } });
 		return Response.json({ success: false, message: "Synthetic feed failure" }, { status: 500 });
 	}
 	if (account === "acc_empty") return Response.json({ success: true, items: [], cursor: {} });
 	if (account === "acc_high") return Response.json({
 		success: true,
-		items: (baseline ? [100, 200, 300, 400] : [749, 750]).map((a) => row(`trans_${a}`, -a, start!, true, account)),
+		items: (baseline ? [100, 200, 300, 400] : [749, 750]).map((a) => row(`trans_${a}`, -a, start, true, account)),
 		cursor: { next: null },
 	});
 	if (account !== "acc_good") throw new Error("Excluded account must not be queried");
 	if (!cursor) return Response.json({
 		success: true,
-		items: baseline ? [row("trans_a", -10, start!), row("trans_b", -20, start!)] : [row("trans_large", -100, start!), row("trans_credit", 900, start!)],
+		items: baseline ? [row("trans_a", -10, start), row("trans_b", -20, start)] : [row("trans_large", -100, start), row("trans_credit", 900, start)],
 		cursor: { next: "page2" },
 	});
 	if (cursor !== "page2") throw new Error("Unexpected cursor");
 	return Response.json({
 		success: true,
 		items: baseline
-			? [row("trans_b", -20, start!), row("trans_c", -30, end!), row("trans_out", -5000, "2025-12-31T23:59:59Z"), row("trans_wrong", -5000, start!, true, "acc_other")]
-			: [row("trans_large", -100, start!), row("trans_new", -40, end!, false), row("trans_small", -99, start!)],
+			? [row("trans_b", -20, start), row("trans_c", -30, end!), row("trans_out", -5000, "2025-12-31T23:59:59Z"), row("trans_wrong", -5000, start, true, "acc_other")]
+			: [row("trans_large", -100, start), row("trans_new", -40, end!, false), row("trans_small", -99, start)],
 		cursor: {},
 	});
 }

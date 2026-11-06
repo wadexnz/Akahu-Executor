@@ -60,11 +60,13 @@ export async function syntheticReview(
 		const match = /^\/v1\/accounts\/(acc_everyday|acc_reserve)\/transactions$/.exec(url.pathname);
 		if (!match) throw new Error("Synthetic demo refuses this path");
 		const account = match[1]!;
-		const baseline = url.searchParams.get("start") === demoScope.baseline.start;
+		const baseline = url.searchParams.get("end") === demoScope.baseline.end;
 		const range = baseline ? demoScope.baseline : demoScope.comparison;
-		if (url.searchParams.get("start") !== range.start || url.searchParams.get("end") !== range.end) throw new Error("Unexpected synthetic date range");
+		const start = Date.parse(url.searchParams.get("start") ?? ""), end = Date.parse(url.searchParams.get("end") ?? "");
+		if (url.searchParams.get("end") !== range.end) throw new Error("Unexpected synthetic date range");
 		if (account === "acc_reserve" && !baseline) return Response.json({}, { status: 503 });
 		const amounts = account === "acc_reserve" ? [999] : baseline ? [20, 30, 50] : [80, 40, 150];
+		// Like Akahu: start is exclusive, end inclusive. Rows sit exactly on the period start.
 		return Response.json({ items: amounts.map((amount, i) => ({
 			_id: `trans_${baseline ? "jan" : "feb"}${account === "acc_reserve" ? "reserve" : i + 1}`,
 			_account: account, date: range.start, amount: -amount,
@@ -72,7 +74,7 @@ export async function syntheticReview(
 			description: !baseline && i === 2 ? "Synthetic transfer to savings" : "Synthetic purchase",
 			category: { name: baseline || i === 0 ? "Groceries" : i === 1 ? "Dining" : "Transfers" },
 			merchant: { name: baseline || i === 0 ? "Fixture Market" : i === 1 ? "Fixture Cafe" : "Fixture Savings" },
-		})), cursor: { next: null } });
+		})).filter(t => Date.parse(t.date) > start && Date.parse(t.date) <= end), cursor: { next: null } });
 	}, { preconnect: () => {} });
 	try {
 		const result = await (await handle(request({ operation: "call", tool: options.tool ?? "insights.reviewSpending", input }), context)).json();

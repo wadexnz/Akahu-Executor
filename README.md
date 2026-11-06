@@ -50,6 +50,13 @@ Failure to fetch account metadata fails the call rather than guessing a unit.
 An original purchase's `fx` currency does not replace the account currency.
 Debit totals include transfers; these tools do not apply the mobile app's rules.
 
+## Date ranges
+
+Every tool treats `start` and `end` as inclusive. Akahu's own `start` is
+exclusive, so the app requests one millisecond earlier; otherwise transactions
+dated exactly at the start (often midnight, since many banks only supply a
+date) would be dropped.
+
 ## Comparing two periods
 
 `insights.compare` takes explicit account IDs and two non-overlapping

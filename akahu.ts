@@ -91,6 +91,14 @@ export async function post(c: Akahu, path: string): Promise<void> {
 	await decodeJson(r, object({}));
 }
 
+// Akahu treats `start` as exclusive (millisecond resolution); tools take inclusive
+// starts, so ask for one millisecond earlier. Bank dates are often exactly midnight.
+function exclusiveStart(start: string) {
+	const ms = Date.parse(start);
+	if (Number.isNaN(ms)) throw new Error(`start is not a valid ISO 8601 timestamp: ${start}`);
+	return new Date(ms - 1).toISOString();
+}
+
 // Page through settled transactions. `filter` runs per page so `limit` counts
 // matches, not raw rows.
 export async function fetchTransactions(
@@ -99,11 +107,12 @@ export async function fetchTransactions(
 	opts: { accountId?: string; limit?: number; filter?: (t: Transaction) => boolean } = {},
 ): Promise<Transaction[]> {
 	const path = opts.accountId ? `/accounts/${encodeURIComponent(opts.accountId)}/transactions` : "/transactions";
+	const query = { start: range.start === undefined ? undefined : exclusiveStart(range.start), end: range.end };
 	const matched: Transaction[] = [];
 	const seen = new Set<string>();
 	let cursor: string | undefined;
 	do {
-		const r = await c.fetch(url(path, { ...range, cursor }), { headers: c.headers, signal: c.signal });
+		const r = await c.fetch(url(path, { ...query, cursor }), { headers: c.headers, signal: c.signal });
 		const page = await decodeJson(r, object({
 			items: array(Transaction), cursor: object({ next: json().optional() }).optional(),
 		}));
