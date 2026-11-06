@@ -1,0 +1,14 @@
+node_modules
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+.DS_Store
+# Executor uploads must not contain a lockfile
+bun.lock
+package-lock.json
+# Local banking data and credentials
+*.csv
+*.db
+credentials.json
