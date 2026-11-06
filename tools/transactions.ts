@@ -1,25 +1,44 @@
 import { array, boolean, number, object, query, router, string } from "apps";
-import { groupOf } from "../analysis.js";
+import { groupOf, nzStartOf, nzDay } from "../analysis.js";
+import { FLOWS, type Classified } from "../classify.js";
 import { resolveGroup } from "../categories.js";
 import { AkahuRejected, fetchAccounts, fetchTransactions, getItem, getItems, postRead } from "../client.js";
 import { PendingTransaction, Transaction, Txn } from "../schemas.js";
-import { client, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
+import { client, flowsFor, groupCurrencies, READ, round, txn, type Ctx } from "./context.js";
 import { annotationsFor, owner, taggedIds } from "./memory.js";
 
-// Settled rows with the user's own notes and tags from this app's memory.
-function annotated(ctx: Ctx, rows: readonly Transaction[]) {
+// Settled rows with their flow and the user's own notes and tags from this app's memory.
+function annotated(ctx: Ctx, rows: readonly Transaction[], flows: ReadonlyMap<string, Classified>) {
 	const memo = annotationsFor(ctx.sql, owner(ctx), rows.map((t) => t._id));
 	return rows.map((t) => {
-		const m = memo.get(t._id);
-		return { ...txn(t), ...(m?.note !== undefined && { note: m.note }), ...(m?.tags.length && { tags: m.tags }) };
+		const m = memo.get(t._id), flow = flows.get(t._id)?.flow;
+		return { ...txn(t), ...(flow && { flow }), ...(m?.note !== undefined && { note: m.note }), ...(m?.tags.length && { tags: m.tags }) };
 	});
+}
+
+// Flows for a few looked-up rows: classified with every account's history from 90 days before
+// the earliest to the day after the latest, so transfer pairs and saving providers are seen.
+async function flowsAround(ctx: Ctx, rows: readonly Transaction[]) {
+	if (!rows.length) return new Map<string, Classified>();
+	const days = rows.map((t) => nzDay(t.date)).sort();
+	const start = new Date(Date.parse(nzStartOf(days[0]!)) - 90 * 864e5).toISOString();
+	const end = new Date(Date.parse(nzStartOf(days.at(-1)!)) + 2 * 864e5 - 1).toISOString();
+	const c = client(ctx);
+	const history = await fetchTransactions(c, { start, end });
+	const ids = new Set(history.map((t) => t._id));
+	return flowsFor(ctx, [...history, ...rows.filter((t) => !ids.has(t._id))], await fetchAccounts(c));
+}
+
+function flowFilter(flow: string | undefined) {
+	if (flow !== undefined && !(FLOWS as readonly string[]).includes(flow)) throw new Error(`flow must be one of ${FLOWS.join(", ")}`);
+	return flow;
 }
 
 const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
-			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Rows carry the user's note and tags when they have any.",
+			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Each row has its flow, as in the mobile app: spending, income, transfer (between the user's own accounts), saving (KiwiSaver, investments, savings providers) or excluded (by the user's rule); flow filters by it. Flows are worked out across every account within start/end, so give a range when you can. Rows carry the user's note and tags when they have any.",
 		input: object({
 			start: string().optional(),
 			end: string().optional(),
@@ -32,6 +51,7 @@ const getTransactions = query(
 			tag: string().optional(),
 			min_amount: number().optional(),
 			max_amount: number().optional(),
+			flow: string().optional(),
 			limit: number().default(500),
 		}),
 		output: object({
@@ -45,15 +65,16 @@ const getTransactions = query(
 		if (!Number.isInteger(i.limit) || i.limit < 1) throw new Error("limit must be a positive integer");
 		const group = resolveGroup(i.group);
 		const tagged = i.tag === undefined ? undefined : taggedIds(ctx.sql, owner(ctx), i.tag);
+		const flow = flowFilter(i.flow);
 		const has = (value: string | undefined, needle: string | undefined) =>
 			needle === undefined || (value ?? "").toLowerCase().includes(needle.toLowerCase());
-		const rows = await fetchTransactions(
-			client(ctx),
-			{ start: i.start, end: i.end },
-			{
-				accountId: i.account_id,
-				limit: i.limit + 1,
-				filter: (t) =>
+		const c = client(ctx), accounts = await fetchAccounts(c);
+		// Every account's rows in the range, so a transfer's other side is seen.
+		const all = await fetchTransactions(c, { start: i.start, end: i.end });
+		const flows = flowsFor(ctx, all, accounts);
+		const rows = all.filter((t) =>
+					(i.account_id === undefined || t._account === i.account_id) &&
+					(flow === undefined || flows.get(t._id)?.flow === flow) &&
 					(i.type === undefined || t.type === i.type.toUpperCase()) &&
 					(i.category === undefined || (t.category !== undefined && has(t.category.name, i.category))) &&
 					(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
@@ -61,17 +82,15 @@ const getTransactions = query(
 					(group === undefined || groupOf(t) === group) &&
 					(tagged === undefined || tagged.has(t._id)) &&
 					(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
-					(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount),
-			},
-		);
+					(i.max_amount === undefined || Math.abs(t.amount) <= i.max_amount));
 		const shown = rows.slice(0, i.limit);
-		const { groups, unknown_currency_transaction_ids } = groupCurrencies(shown, await fetchAccounts(client(ctx)));
+		const { groups, unknown_currency_transaction_ids } = groupCurrencies(shown, accounts);
 		return {
 			count: shown.length,
 			truncated: rows.length > i.limit,
 			currencies: groups.map(([currency, rows]) => ({ currency, net_total: round(rows.reduce((sum, t) => sum + t.amount, 0)) })),
 			unknown_currency_transaction_ids,
-			transactions: annotated(ctx, shown),
+			transactions: annotated(ctx, shown, flows),
 		};
 	},
 );
@@ -79,13 +98,15 @@ const getTransactions = query(
 const getTransaction = query(
 	{
 		title: "Get transaction",
-		description: "Fetch one settled transaction by id (trans_...).",
+		description: "Fetch one settled transaction by id (trans_...), with its flow as in transactions.search.",
 		input: object({ transaction_id: string({ minLength: 1 }) }),
 		output: Txn,
 		annotations: READ,
 	},
-	async (ctx: Ctx, { transaction_id }) =>
-		annotated(ctx, [await getItem(client(ctx), `/transactions/${encodeURIComponent(transaction_id)}`, Transaction)])[0]!,
+	async (ctx: Ctx, { transaction_id }) => {
+		const row = await getItem(client(ctx), `/transactions/${encodeURIComponent(transaction_id)}`, Transaction);
+		return annotated(ctx, [row], await flowsAround(ctx, [row]))[0]!;
+	},
 );
 
 const getPendingTransactions = query(
@@ -120,7 +141,7 @@ const getManyTransactions = query(
 			throw new Error(`${error.message}. One malformed id makes Akahu reject the whole batch: use complete trans_... ids exactly as transactions.search returned them.`);
 		});
 		const found = new Set(items.map((t) => t._id));
-		return { transactions: annotated(ctx, items), missing_ids: ids.filter((id) => !found.has(id)) };
+		return { transactions: annotated(ctx, items, await flowsAround(ctx, items)), missing_ids: ids.filter((id) => !found.has(id)) };
 	},
 );
 
@@ -128,7 +149,7 @@ const getTransactionSummary = query(
 	{
 		title: "Summarise transactions",
 		description:
-			"Totals of settled transactions separated by account currency, then grouped by category, personal-finance group, merchant or type (group_by: category (default), group, merchant or type), for an optional start/end range, account_id and group filter. No FX conversion. unknown_currency_transaction_ids identifies rows counted but excluded from totals because currency is unavailable. spending_only excludes money in; debits include transfers, not mobile spending classifications. Groups are sorted most negative first.",
+			"Totals of settled transactions separated by account currency, then grouped by category, personal-finance group, merchant or type (group_by: category (default), group, merchant or type), for an optional start/end range, account_id and group filter. No FX conversion. unknown_currency_transaction_ids identifies rows counted but excluded from totals because currency is unavailable. spending_only keeps debits only, transfers included; flow (spending, income, transfer, saving or excluded) keeps only that flow, as in the mobile app, so flow: spending gives classified spending. Groups are sorted most negative first.",
 		input: object({
 			start: string().optional(),
 			end: string().optional(),
@@ -136,6 +157,7 @@ const getTransactionSummary = query(
 			account_id: string().optional(),
 			group: string().optional(),
 			spending_only: boolean().default(false),
+			flow: string().optional(),
 		}),
 		output: object({
 			group_by: string(),
@@ -152,12 +174,14 @@ const getTransactionSummary = query(
 	async (ctx: Ctx, i) => {
 		if (!["category", "group", "merchant", "type"].includes(i.group_by)) throw new Error("group_by must be category, group, merchant or type");
 		const group = resolveGroup(i.group);
-		const rows = await fetchTransactions(
-			client(ctx),
-			{ start: i.start, end: i.end },
-			{ accountId: i.account_id, filter: (t) => (!i.spending_only || t.amount < 0) && (group === undefined || groupOf(t) === group) },
-		);
-		const { groups: currencies, unknown_currency_transaction_ids } = groupCurrencies(rows, await fetchAccounts(client(ctx)));
+		const flow = flowFilter(i.flow);
+		const c = client(ctx), accounts = await fetchAccounts(c);
+		const all = await fetchTransactions(c, { start: i.start, end: i.end }, flow === undefined && i.account_id ? { accountId: i.account_id } : {});
+		const flows = flow === undefined ? undefined : flowsFor(ctx, all, accounts);
+		const rows = all.filter((t) =>
+			(i.account_id === undefined || t._account === i.account_id) && (!i.spending_only || t.amount < 0) &&
+			(group === undefined || groupOf(t) === group) && (flows === undefined || flows.get(t._id)?.flow === flow));
+		const { groups: currencies, unknown_currency_transaction_ids } = groupCurrencies(rows, accounts);
 		return {
 			group_by: i.group_by,
 			transaction_count: rows.length,

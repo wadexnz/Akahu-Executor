@@ -1,5 +1,8 @@
 import { event, object, string, type MutationContext, type QueryContext } from "apps";
+import { priced } from "../analysis.js";
+import { classify, type Classified } from "../classify.js";
 import type { Akahu } from "../client.js";
+import { loadRules, owner } from "./memory.js";
 import { akahu } from "../provider.js";
 import type { Account, PendingTransaction, Transaction } from "../schemas.js";
 
@@ -43,6 +46,12 @@ export function txn(t: Transaction | PendingTransaction) {
 }
 
 export { round } from "../analysis.js";
+
+// Each settled row's flow, worked out across every row given (pass all accounts' rows so a
+// transfer keeps its other side). Rows whose account currency is unknown get none.
+export function flowsFor(ctx: Ctx, rows: readonly Transaction[], accounts: readonly Account[]): Map<string, Classified> {
+	return new Map(classify(priced(rows, accounts).rows, accounts, loadRules(ctx.sql, owner(ctx))).map((t) => [t._id, t]));
+}
 
 // Account currency is the unit of the settled amount, not the original FX purchase.
 // Missing metadata must never silently turn an amount into NZD (or a mixed total).

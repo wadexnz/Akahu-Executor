@@ -31,12 +31,12 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `insights.compare` | Compare two periods (see below) | |
 | `insights.reviewSpending` | Guided comparison: ask for missing accounts or periods, then return the same evidence-backed report | |
 | `insights.recurring` | Subscriptions and regular bills, with cadence, next expected date and monthly cost | |
-| `insights.cashflow` | Money in and out per NZ calendar month, without transfers between your own accounts | |
+| `insights.cashflow` | The mobile app's monthly breakdown: income, spending, net, saving and top categories per NZ month | |
 | `insights.merchantHistory` | Everything paid to or received from one merchant, by month | |
 | `insights.largeOrUnusual` | Large debits to a new payee, or at least 3 times a payee's usual amount | |
 | `insights.budgetStatus` | Spending against your monthly budgets for one month | |
 | `memory.setNote`, `memory.tag`, `memory.untag`, `memory.listTags` | Private notes and tags on transactions | |
-| `memory.addRule`, `memory.listRules`, `memory.removeRule` | Rules that mark transactions as transfers or leave them out of insights | |
+| `memory.addRule`, `memory.listRules`, `memory.removeRule` | Rules that set a transaction's flow, or leave it out of insights | |
 | `memory.setBudget`, `memory.listBudgets` | Monthly budgets per personal-finance group | |
 | `monitor.check` | Save today's balances and raise new alerts (the daily schedule runs it) | |
 | `monitor.alerts`, `monitor.acknowledge` | Alerts raised so far, and marking them seen | |
@@ -82,7 +82,7 @@ metadata are counted and listed in `unknown_currency_transaction_ids`, but are
 excluded from monetary totals; `transactions.search` still returns those rows.
 Failure to fetch account metadata fails the call rather than guessing a unit.
 An original purchase's `fx` currency does not replace the account currency.
-Debit totals include transfers; these tools do not apply the mobile app's rules.
+Debit totals include transfers unless you pass `flow` (see [Flows](#flows)).
 
 ## Date ranges
 
@@ -177,15 +177,37 @@ failed account is excluded from both periods, and an unusual debit turns out to
 be a transfer. The automated tests exercise the same fixture. This is not a live
 MCP session or proof that a particular client renders the form correctly.
 
+## Flows
+
+Every settled transaction gets a flow, with the same rules as the NZ Account
+Thread mobile app (`classify.ts`, ported from its `classifyTransaction`), so the
+agent, the dashboard and the phone agree on what counts as spending. First match
+wins:
+
+1. Your first matching rule (`memory.addRule`): spending, income, transfer,
+   saving, or `exclude` (left out of every insight; mobile has no exclude).
+2. Account type: KiwiSaver, investment and term deposit are saving; loans are
+   transfers.
+3. A debit and a credit on the same NZ day, in two different accounts, of
+   opposite amounts within half a cent and the same currency: transfer.
+4. Akahu type: fees and tax are spending, interest is income or spending by
+   sign, `LOAN` is a transfer.
+5. A debit in a financial-services NZFCC category is saving.
+6. A credit with no merchant whose description names exactly one saving
+   provider (a merchant you paid in such a category) is saving: a withdrawal.
+7. Otherwise debits are spending and credits income.
+
+Flows are worked out across all your accounts before any account filter, so a
+transfer to an account outside the view stays a transfer. `transactions.search`,
+`get` and `getMany` show each row's `flow`; `search` and `summary` filter by it.
+
 ## Insights
 
-`recurring`, `cashflow`, `largeOrUnusual` and `budgetStatus` leave out money
-moving between your own accounts. A debit and a credit of exactly the same
-amount and currency, in two different connected accounts within 3 days, are
-paired as a transfer. Your rules catch transfers that pairing cannot see, such
-as repayments to a credit card that is not connected. They also leave out rows
-matched by `exclude` rules. Each result reports `rules_applied`, and `cashflow`
-counts the rows left out per month.
+`recurring`, `cashflow`, `largeOrUnusual` and `budgetStatus` use flows:
+recurring payments, unusual debits and budgets count spending only, and
+`cashflow` reports income, spending, net and saving per month, with the top 5
+spending categories, and counts transfers and excluded rows it left out. Each
+result reports `rules_applied`.
 
 - Months and payment days use NZ calendar dates (Pacific/Auckland), including
   daylight-saving changes.
@@ -194,7 +216,7 @@ counts the rows left out per month.
   with at least 60% of the gaps fitting it. Without merchant enrichment, the
   description without numbers stands in for the merchant.
 - `largeOrUnusual` is a review aid, not fraud detection.
-- `compare`, `reviewSpending`, `search` and `summary` do not apply rules or pairing.
+- `compare` and `reviewSpending` compare raw debits and do not use flows.
 
 ## Memory
 
@@ -227,7 +249,7 @@ Each alert is raised once, however often the check runs. It is stored for
 `monitor.alerts` and emitted as an `alert.raised` event (filter: `kind`) that
 MCP clients can subscribe to. The event carries only ids; the message, which
 includes amounts and merchant names, stays in the app. Transfers between your
-own accounts and your `memory` rules are applied as in the insights. If Akahu's
+own accounts, saving and your `memory` rules are left out as in the insights. If Akahu's
 transaction history cannot be read, balances and balance alerts are still saved
 and the result reports `transaction_checks: "failed"`.
 
@@ -265,7 +287,8 @@ After deploying, `tools.executor.appUi.location` returns the page's URL.
 | `client.ts` | HTTP helpers, retries, error mapping, caching and transaction paging |
 | `schemas.ts` | Akahu response decoders and output shapes shared by the tools and the dashboard |
 | `compare.ts` | Pure period-comparison logic |
-| `analysis.ts` | Pure NZ-date, rule, transfer-pairing, recurring and unusual-debit logic |
+| `classify.ts` | Transaction flows, ported from the mobile app, and rule matching |
+| `analysis.ts` | Pure NZ-date, recurring and unusual-debit logic |
 | `migrations/` | The app database schema for memory, balance snapshots and alerts |
 | `categories.ts` | Bundled NZFCC categories (regenerate from nzfcc.org when they change) |
 | `tools/*.ts` | One router per group (`accounts`, `transactions`, `categories`, `insights`, `memory`, `monitor`, `identity`, `admin`) |

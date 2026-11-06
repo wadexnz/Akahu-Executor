@@ -130,13 +130,13 @@ type Flow = Infer<typeof CashflowOut>["currencies"][number];
 
 function CashflowChart({ flow, month, onMonth }: { flow: Flow; month: string; onMonth: (m: string) => void }) {
 	const W = 720, H = 220, left = 56, bottom = 28, top = 8;
-	const max = Math.max(1, ...flow.months.flatMap((m) => [m.income, -m.outgoings]));
+	const max = Math.max(1, ...flow.months.flatMap((m) => [m.income, -m.spending]));
 	const step = 10 ** Math.floor(Math.log10(max));
 	const ceiling = Math.ceil(max / step) * step;
 	const y = (v: number) => top + (H - top - bottom) * (1 - v / ceiling);
 	const slot = (W - left) / flow.months.length, bar = Math.min(48, slot / 3);
 	return (
-		<svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`Income and outgoings per month in ${flow.currency}`}>
+		<svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={`Income and spending per month in ${flow.currency}`}>
 			<defs>
 				{(["income", "spend"] as const).map((k) => (
 					<pattern key={k} id={`hatch-${k}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -156,10 +156,10 @@ function CashflowChart({ flow, month, onMonth }: { flow: Flow; month: string; on
 				const selected = m.month === month;
 				return (
 					<g key={m.month} onClick={() => onMonth(m.month)} className="cursor-pointer">
-						<title>{`${monthLabel(m.month)}: in ${money(m.income, flow.currency)}, out ${money(-m.outgoings, flow.currency)}${m.partial ? " (so far)" : ""}`}</title>
+						<title>{`${monthLabel(m.month)}: in ${money(m.income, flow.currency)}, out ${money(-m.spending, flow.currency)}${m.partial ? " (so far)" : ""}`}</title>
 						<rect x={left + slot * i + 4} y={top} width={slot - 8} height={H - top - bottom} rx="10" fill={selected ? "#f1eee6" : "transparent"} />
 						<rect x={x - bar - 3} y={y(m.income)} width={bar} height={y(0) - y(m.income)} rx="3" fill={m.partial ? "url(#hatch-income)" : "var(--color-income)"} />
-						<rect x={x + 3} y={y(-m.outgoings)} width={bar} height={y(0) - y(-m.outgoings)} rx="3" fill={m.partial ? "url(#hatch-spend)" : "var(--color-spend)"} />
+						<rect x={x + 3} y={y(-m.spending)} width={bar} height={y(0) - y(-m.spending)} rx="3" fill={m.partial ? "url(#hatch-spend)" : "var(--color-spend)"} />
 						<text x={x} y={H - 8} textAnchor="middle" fontSize="12" fontWeight={selected ? 600 : 400} fill={selected ? "var(--color-ink)" : "var(--color-muted)"}>{monthLabel(m.month, "short")}</text>
 					</g>
 				);
@@ -174,7 +174,7 @@ function Cashflow({ month, onMonth }: { month: string; onMonth: (m: string) => v
 	const legend = (
 		<div className="flex gap-5 text-sm text-muted">
 			<span className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-income" />Income</span>
-			<span className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-spend" />Outgoings</span>
+			<span className="flex items-center gap-2"><i className="h-2.5 w-2.5 rounded-full bg-spend" />Spending</span>
 		</div>
 	);
 	return (
@@ -196,7 +196,7 @@ function Cashflow({ month, onMonth }: { month: string; onMonth: (m: string) => v
 							<CashflowChart flow={flow} month={month} onMonth={onMonth} />
 							{m && (
 								<p className="mt-3 text-sm text-muted">
-									{monthLabel(m.month)}{m.partial ? " so far" : ""}: <b className="text-ink">{money(m.income, flow.currency)}</b> in, <b className="text-ink">{money(-m.outgoings, flow.currency)}</b> out,
+									{monthLabel(m.month)}{m.partial ? " so far" : ""}: <b className="text-ink">{money(m.income, flow.currency)}</b> in, <b className="text-ink">{money(-m.spending, flow.currency)}</b> out,
 									net <b className={m.net < 0 ? "text-[#c0533f]" : "text-ink"}>{money(m.net, flow.currency)}</b>.
 									{" "}{m.transfers_left_out} transfer{m.transfers_left_out === 1 ? "" : "s"} between your own accounts left out{m.excluded_by_rules ? `, ${m.excluded_by_rules} excluded by your rules` : ""}.
 								</p>
@@ -399,7 +399,7 @@ function MonthlyReview() {
 				<UpcomingBills />
 			</div>
 			<Balances />
-			<footer className="pb-4 text-xs text-muted">Read-only view of your Akahu data. Akahu syncs banks about once a day; transfers between your own accounts and your rules are left out of cashflow and budgets.</footer>
+			<footer className="pb-4 text-xs text-muted">Read-only view of your Akahu data. Akahu syncs banks about once a day; flows follow the mobile app: transfers between your own accounts and saving are left out of spending.</footer>
 		</main>
 	);
 }

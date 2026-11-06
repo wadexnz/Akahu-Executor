@@ -1,12 +1,13 @@
 import { array, boolean, number, object, query, router, string, type ElicitationResponse, type FormElicitation } from "apps";
 import {
-	addMonths, classify, findRecurring, findUnusual, groupOf, nzDay, nzMonthRange, payeeKey, payeeName, priced, round, type Row,
+	addMonths, findRecurring, findUnusual, groupOf, nzDay, nzMonthRange, payeeKey, payeeName, priced, round,
 } from "../analysis.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { compareInsights } from "../compare.js";
 import { BudgetStatusOut, CashflowOut, CompareInput, CompareOut, Currencies, Interval, RecurringOut, RulesApplied } from "../schemas.js";
-import { client, READ, type Ctx } from "./context.js";
-import { loadBudgets, loadRules, owner } from "./memory.js";
+import { rulesApplied, type Classified } from "../classify.js";
+import { client, flowsFor, READ, type Ctx } from "./context.js";
+import { loadBudgets, owner } from "./memory.js";
 
 const compareTransactionInsights = query(
 	{
@@ -69,14 +70,23 @@ const reviewSpending = query(
 	},
 );
 
-// Settled rows for a range, in their accounts' currencies, optionally for some accounts only.
+// Settled rows for a range, in their accounts' currencies, each with its flow. Every account is
+// classified together (so a transfer keeps its other side), then narrowed to accountIds.
 async function settled(ctx: Ctx, range: { start: string; end: string }, accountIds?: readonly string[]) {
 	const c = client(ctx);
 	const accounts = await fetchAccounts(c);
-	const rows = await fetchTransactions(c, range, accountIds?.length === 1 ? { accountId: accountIds[0] } : {});
-	const scoped = accountIds ? rows.filter((t) => accountIds.includes(t._account)) : rows;
-	return priced(scoped, accounts);
+	const all = await fetchTransactions(c, range);
+	const inScope = (t: { _account: string }) => accountIds === undefined || accountIds.includes(t._account);
+	const flows = flowsFor(ctx, all, accounts);
+	const scoped = [...flows.values()].filter(inScope);
+	return {
+		rows: scoped,
+		rules_applied: rulesApplied(scoped),
+		unknown_currency_transaction_ids: all.filter((t) => inScope(t) && !flows.has(t._id)).map((t) => t._id),
+	};
 }
+
+const ofFlow = (rows: readonly Classified[], ...flows: string[]) => rows.filter((t) => flows.includes(t.flow));
 
 function wholeNumber(value: number, name: string, min: number, max: number) {
 	if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be a whole number from ${min} to ${max}`);
@@ -94,7 +104,7 @@ const monthsBack = (now: number, months: number) => new Date(now - months * 30.4
 export const recurring = query(
 	{
 		title: "Find recurring payments",
-		description: "Subscriptions, bills and other regular debits found in settled history (default the last 13 months): debits to the same merchant (or the same description without numbers) in the same currency on a weekly, fortnightly, monthly, quarterly or yearly cadence, with at least min_occurrences (default 3) payment days. Each has its typical amount, next expected date (active ones), status (active or lapsed), a monthly equivalent and evidence ids. Money moved between the user's own accounts and rows matched by the user's exclude or transfer rules are left out. totals sums active monthly equivalents per currency.",
+		description: "Subscriptions, bills and other regular debits found in settled history (default the last 13 months): debits to the same merchant (or the same description without numbers) in the same currency on a weekly, fortnightly, monthly, quarterly or yearly cadence, with at least min_occurrences (default 3) payment days. Each has its typical amount, next expected date (active ones), status (active or lapsed), a monthly equivalent and evidence ids. Only spending counts, as in the mobile app: transfers between the user's own accounts, saving (KiwiSaver, investment platforms) and rows the user's rules exclude are left out. totals sums active monthly equivalents per currency.",
 		input: object({ months: number().default(13), account_id: string().optional(), min_occurrences: number().default(3) }),
 		output: RecurringOut,
 		annotations: READ,
@@ -103,9 +113,8 @@ export const recurring = query(
 		const months = wholeNumber(i.months, "months", 2, 24), minOccurrences = wholeNumber(i.min_occurrences, "min_occurrences", 2, 24);
 		const now = Date.now();
 		const period = { start: monthsBack(now, months), end: new Date(now).toISOString() };
-		const { rows, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_id === undefined ? undefined : [i.account_id]);
-		const { kept, rules_applied } = classify(rows, loadRules(ctx.sql, owner(ctx)));
-		const payments = findRecurring(kept, { today: nzDay(now), minOccurrences });
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_id === undefined ? undefined : [i.account_id]);
+		const payments = findRecurring(ofFlow(rows, "spending"), { today: nzDay(now), minOccurrences });
 		const totals = new Map<string, { currency: string; active_count: number; active_monthly_equivalent: number }>();
 		for (const p of payments) {
 			if (p.status !== "active") continue;
@@ -121,7 +130,7 @@ export const recurring = query(
 export const cashflow = query(
 	{
 		title: "Monthly cash flow",
-		description: "Money in and out per NZ calendar month (Pacific/Auckland), per currency, for the last `months` months including the current, partial one (default 6). Money moved between the user's own accounts is left out: a debit and a credit of exactly the same amount in two of their accounts within 3 days are paired, and the user's transfer rules catch the rest (for example credit card repayments to a card Akahu does not see). Rows matched by exclude rules are left out too. Optional account_ids limits the view to those accounts; a transfer to an account outside them then counts as money out. Each month reports how many rows were left out.",
+		description: "The mobile app's monthly breakdown, per NZ calendar month (Pacific/Auckland) and currency, for the last `months` months including the current, partial one (default 6): income, spending (negative), net (income + spending), the top 5 spending categories, and saving (net money moved to (negative) or from savings and investments, kept out of net). Transfers between the user's own accounts are left out and counted, as are rows the user's rules exclude. Flows follow the mobile app (see transactions.search). Optional account_ids limits the view to those accounts; flows are still worked out across every account, so a transfer to an account outside the view stays a transfer.",
 		input: object({ months: number().default(6), account_ids: array(string({ minLength: 1 })).optional() }),
 		output: CashflowOut,
 		annotations: READ,
@@ -132,30 +141,34 @@ export const cashflow = query(
 		const current = nzDay(now).slice(0, 7);
 		const list = Array.from({ length: months }, (_, n) => addMonths(current, n - months + 1));
 		const period = { start: nzMonthRange(list[0]!).start, end: new Date(now).toISOString() };
-		const { rows, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_ids);
-		const { kept, transfers, excluded, rules_applied } = classify(rows, loadRules(ctx.sql, owner(ctx)));
-		const byCurrency = new Map<string, Map<string, { income: number; outgoings: number; transfers_left_out: number; excluded_by_rules: number }>>();
-		const bucket = (t: Row) => {
-			const monthsOf = byCurrency.get(t.currency) ?? new Map(list.map((m) => [m, { income: 0, outgoings: 0, transfers_left_out: 0, excluded_by_rules: 0 }]));
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_ids);
+		type Month = { income: number; spending: number; saving: number; transfers_left_out: number; excluded_by_rules: number; categories: Map<string, number> };
+		const byCurrency = new Map<string, Map<string, Month>>();
+		for (const t of rows) {
+			const monthsOf = byCurrency.get(t.currency) ?? new Map(list.map((m) => [m, { income: 0, spending: 0, saving: 0, transfers_left_out: 0, excluded_by_rules: 0, categories: new Map() }]));
 			byCurrency.set(t.currency, monthsOf);
-			return monthsOf.get(nzDay(t.date).slice(0, 7));
-		};
-		for (const t of kept) {
-			const b = bucket(t);
-			if (b && t.amount > 0) b.income += t.amount;
-			else if (b) b.outgoings += t.amount;
+			const b = monthsOf.get(nzDay(t.date).slice(0, 7));
+			if (!b) continue;
+			// As in the mobile app's monthly breakdown: spending is the size of each spending row.
+			if (t.flow === "income") b.income += t.amount;
+			else if (t.flow === "spending") {
+				b.spending -= Math.abs(t.amount);
+				const category = t.category?.name ?? "Uncategorised";
+				b.categories.set(category, (b.categories.get(category) ?? 0) + Math.abs(t.amount));
+			} else if (t.flow === "saving") b.saving += t.amount;
+			else if (t.flow === "transfer") b.transfers_left_out++;
+			else b.excluded_by_rules++;
 		}
-		for (const t of transfers) { const b = bucket(t); if (b) b.transfers_left_out++; }
-		for (const t of excluded) { const b = bucket(t); if (b) b.excluded_by_rules++; }
 		return {
 			period,
 			currencies: [...byCurrency].sort(([a], [b]) => a.localeCompare(b)).map(([currency, monthsOf]) => {
 				const rowsOut = [...monthsOf].map(([month, b]) => ({
-					month, partial: month === current, income: round(b.income), outgoings: round(b.outgoings), net: round(b.income + b.outgoings),
+					month, partial: month === current, income: round(b.income), spending: round(b.spending), net: round(b.income + b.spending), saving: round(b.saving),
 					transfers_left_out: b.transfers_left_out, excluded_by_rules: b.excluded_by_rules,
+					top_spending: [...b.categories].sort((x, y) => y[1] - x[1]).slice(0, 5).map(([category, amount]) => ({ category, amount: round(amount) })),
 				}));
-				const income = round(rowsOut.reduce((s, m) => s + m.income, 0)), outgoings = round(rowsOut.reduce((s, m) => s + m.outgoings, 0));
-				return { currency, months: rowsOut, total: { income, outgoings, net: round(income + outgoings) } };
+				const sum = (k: "income" | "spending" | "saving") => round(rowsOut.reduce((s, m) => s + m[k], 0));
+				return { currency, months: rowsOut, total: { income: sum("income"), spending: sum("spending"), net: round(sum("income") + sum("spending")), saving: sum("saving") } };
 			}),
 			rules_applied,
 			unknown_currency_transaction_ids,
@@ -220,7 +233,7 @@ const merchantHistory = query(
 const largeOrUnusual = query(
 	{
 		title: "Large or unusual debits",
-		description: "Debits of at least min_amount (default 100, in the account's currency) between start and end (default the last 30 days) that are either the first payment to that payee in the lookback (default 180 days before each debit's period) or at least 3 times that payee's usual debit. A heuristic for review, not fraud detection. Money moved between the user's own accounts and rows matched by the user's rules are left out.",
+		description: "Debits of at least min_amount (default 100, in the account's currency) between start and end (default the last 30 days) that are either the first payment to that payee in the lookback (default 180 days before each debit's period) or at least 3 times that payee's usual debit. A heuristic for review, not fraud detection. Only spending counts (flows as in the mobile app): transfers, saving and rows the user's rules exclude are left out.",
 		input: object({ start: string().optional(), end: string().optional(), min_amount: number().default(100), lookback_days: number().default(180), account_id: string().optional() }),
 		output: object({
 			period: Interval,
@@ -240,16 +253,15 @@ const largeOrUnusual = query(
 		const start = i.start === undefined ? end - 30 * 864e5 : instant(i.start, "start");
 		if (start >= end) throw new Error("start must be before end");
 		const period = { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
-		const { rows, unknown_currency_transaction_ids } = await settled(ctx, { start: new Date(start - lookback * 864e5).toISOString(), end: period.end }, i.account_id === undefined ? undefined : [i.account_id]);
-		const { kept, rules_applied } = classify(rows, loadRules(ctx.sql, owner(ctx)));
-		return { period, debits: findUnusual(kept, { ...period, minAmount: i.min_amount }), rules_applied, unknown_currency_transaction_ids };
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: new Date(start - lookback * 864e5).toISOString(), end: period.end }, i.account_id === undefined ? undefined : [i.account_id]);
+		return { period, debits: findUnusual(ofFlow(rows, "spending"), { ...period, minAmount: i.min_amount }), rules_applied, unknown_currency_transaction_ids };
 	},
 );
 
 export const budgetStatus = query(
 	{
 		title: "Budget status",
-		description: "Spending against the user's monthly budgets (memory.setBudget) for one NZ calendar month (YYYY-MM, default the current month): per personal-finance group and currency, the budget, spent so far, remaining and percent used, beside how much of the month has passed. Also lists spending in groups without a budget. Spending is the sum of debits in the group; money moved between the user's own accounts and rows matched by the user's rules are left out.",
+		description: "Spending against the user's monthly budgets (memory.setBudget) for one NZ calendar month (YYYY-MM, default the current month): per personal-finance group and currency, the budget, spent so far, remaining and percent used, beside how much of the month has passed. Also lists spending in groups without a budget. Spending is the size of each spending row in the group (flows as in the mobile app, so a refund classified as income does not reduce it); transfers, saving and rows the user's rules exclude are left out.",
 		input: object({ month: string().optional() }),
 		output: BudgetStatusOut,
 		annotations: READ,
@@ -261,13 +273,12 @@ export const budgetStatus = query(
 		if (Date.parse(range.start) > now) throw new Error(`${month} has not started yet`);
 		const period = { start: range.start, end: new Date(Math.min(now, Date.parse(range.end))).toISOString() };
 		const elapsed = Math.min(1, (now - Date.parse(range.start)) / (Date.parse(range.end) + 1 - Date.parse(range.start)));
-		const { rows, unknown_currency_transaction_ids } = await settled(ctx, period);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period);
 		const who = owner(ctx);
-		const { kept, rules_applied } = classify(rows, loadRules(ctx.sql, who));
 		const spent = new Map<string, number>();
-		for (const t of kept) {
+		for (const t of ofFlow(rows, "spending")) {
 			const group = groupOf(t);
-			if (t.amount < 0 && group) spent.set(`${group}|${t.currency}`, (spent.get(`${group}|${t.currency}`) ?? 0) - t.amount);
+			if (group) spent.set(`${group}|${t.currency}`, (spent.get(`${group}|${t.currency}`) ?? 0) + Math.abs(t.amount));
 		}
 		const budgets = loadBudgets(ctx.sql, who).map((b) => {
 			const used = round(spent.get(`${b.group}|${b.currency}`) ?? 0);
@@ -287,6 +298,6 @@ export const insights = router(
 	{
 		title: "Insights",
 		description: "Evidence-backed views of settled transactions: period comparisons, recurring payments, monthly cash flow, merchant history, unusual debits and budgets.",
-		instructions: "Read the matching skill first: reviewing-spending for period comparisons, finding-subscriptions for recurring payments, monthly-checkin for a monthly review, and akahu-data-limits before relying on history or freshness. compare and reviewSpending include transfers between the user's own accounts; recurring, cashflow, largeOrUnusual and budgetStatus leave paired transfers and rule matches out and report rules_applied. Quote evidence ids for claims about specific payments. Totals are per currency; never add currencies together. Check coverage before quoting totals: a failed or excluded account is never counted as zero.",
+		instructions: "Read the matching skill first: reviewing-spending for period comparisons, finding-subscriptions for recurring payments, monthly-checkin for a monthly review, and akahu-data-limits before relying on history or freshness. compare and reviewSpending include transfers between the user's own accounts. recurring, cashflow, largeOrUnusual and budgetStatus use the mobile app's flows (spending, income, transfer, saving; see transactions.search) and report rules_applied. Quote evidence ids for claims about specific payments. Totals are per currency; never add currencies together. Check coverage before quoting totals: a failed or excluded account is never counted as zero.",
 	},
 );

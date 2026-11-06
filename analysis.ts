@@ -1,5 +1,5 @@
-// Pure analysis over settled transactions: NZ calendar dates, the user's rules, transfer
-// pairing, recurring payments and unusual debits. Nothing here calls Akahu or the database.
+// Pure analysis over settled transactions: NZ calendar dates, recurring payments and unusual
+// debits (flows are in classify.ts). Nothing here calls Akahu or the database.
 import type { Account, Transaction } from "./schemas.js";
 
 export const round = (n: number) => Math.round(n * 100) / 100;
@@ -74,63 +74,6 @@ export function payeeKey(t: Transaction) {
 
 export const payeeName = (t: Transaction) => t.merchant?.name ?? t.description;
 export const groupOf = (t: Transaction) => t.category?.groups?.personal_finance?.name;
-
-export type RuleMatch = { description?: string; merchant?: string; other_account?: string; account_id?: string; direction?: string };
-export type Rule = { id: string; kind: string; match: RuleMatch; reason?: string };
-export const RULE_KINDS = ["transfer", "exclude"];
-
-const contains = (value: string | undefined, needle: string) => (value ?? "").toLowerCase().includes(needle.toLowerCase());
-// Account numbers are compared without dashes or spaces.
-const alnum = (s: string | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-export function ruleMatches(r: RuleMatch, t: Transaction) {
-	return (r.description === undefined || contains(t.description, r.description)) &&
-		(r.merchant === undefined || (t.merchant !== undefined && contains(t.merchant.name, r.merchant))) &&
-		(r.other_account === undefined || (alnum(t.meta?.other_account) !== "" && alnum(t.meta?.other_account).includes(alnum(r.other_account)))) &&
-		(r.account_id === undefined || t._account === r.account_id) &&
-		(r.direction === undefined || (r.direction === "debit" ? t.amount < 0 : t.amount > 0));
-}
-
-const cents = (n: number) => Math.round(Math.abs(n) * 100);
-const TRANSFER_DAYS = 3;
-
-// Pair each debit with a credit of exactly the same amount and currency in another of the
-// user's accounts within three days: money moved between their own accounts.
-export function pairTransfers(rows: readonly Row[]) {
-	const credits = new Map<string, Row[]>();
-	for (const t of rows) {
-		if (t.amount <= 0) continue;
-		const key = `${t.currency}:${cents(t.amount)}`;
-		credits.set(key, [...(credits.get(key) ?? []), t]);
-	}
-	const paired = new Set<string>();
-	for (const d of [...rows].filter((t) => t.amount < 0).sort((a, b) => Date.parse(a.date) - Date.parse(b.date))) {
-		let best: Row | undefined;
-		let bestGap = Infinity;
-		for (const c of credits.get(`${d.currency}:${cents(d.amount)}`) ?? []) {
-			const gap = Math.abs(Date.parse(c.date) - Date.parse(d.date)) / 864e5;
-			if (!paired.has(c._id) && c._account !== d._account && gap <= TRANSFER_DAYS && gap < bestGap) { best = c; bestGap = gap; }
-		}
-		if (best) { paired.add(d._id); paired.add(best._id); }
-	}
-	return paired;
-}
-
-// Split rows into what insights count (kept), money moved between the user's own accounts
-// (by rule or pairing) and rows the user's rules exclude. Rules win over pairing.
-export function classify(rows: readonly Row[], rules: readonly Rule[]) {
-	const kept: Row[] = [], transfers: Row[] = [], excluded: Row[] = [], unruled: Row[] = [];
-	const applied = new Map<string, number>();
-	for (const t of rows) {
-		const rule = rules.find((r) => ruleMatches(r.match, t));
-		if (!rule) { unruled.push(t); continue; }
-		applied.set(rule.id, (applied.get(rule.id) ?? 0) + 1);
-		(rule.kind === "exclude" ? excluded : transfers).push(t);
-	}
-	const paired = pairTransfers(unruled);
-	for (const t of unruled) (paired.has(t._id) ? transfers : kept).push(t);
-	return { kept, transfers, excluded, rules_applied: [...applied].map(([rule_id, count]) => ({ rule_id, count })) };
-}
 
 const CADENCES = [
 	{ name: "weekly", days: 7, min: 6, max: 8 },

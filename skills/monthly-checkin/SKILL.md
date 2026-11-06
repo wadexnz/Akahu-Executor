@@ -30,7 +30,8 @@ A short, evidence-backed review of one NZ calendar month and the month before it
 
 ## Report
 
-- Lead with net cash flow per currency, then income and outgoings. Never add
+- Lead with net cash flow per currency, then income, spending and the top
+  spending categories. Mention saving separately; it is not spending. Never add
   currencies together.
 - Then budgets that are over or ahead of pace, then unusual debits, then upcoming
   regular payments.
@@ -44,4 +45,4 @@ A short, evidence-backed review of one NZ calendar month and the month before it
 ## Remember
 
 Offer, never assume: tagging a payment (`memory.tag`), a note (`memory.setNote`), a
-rule for a transfer the pairing missed (`memory.addRule`), or a budget change.
+rule that sets the right flow when one looks wrong (`memory.addRule`), or a budget change.

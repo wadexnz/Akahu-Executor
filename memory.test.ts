@@ -84,9 +84,9 @@ test("rules are validated, kept per caller, and change what cash flow counts", a
 	akahu([
 		tx("trans_pay", "acc_everyday", "2026-10-15T00:00:00Z", 4000, { description: "SALARY" }),
 		tx("trans_rent", "acc_everyday", "2026-10-16T00:00:00Z", -2000, { description: "RENT" }),
-		// Paired automatically: same amount, two of the user's accounts, a day apart.
+		// Paired automatically: same amount, two of the user's accounts, the same NZ day.
 		tx("trans_save_out", "acc_everyday", "2026-10-20T00:00:00Z", -500, { description: "TO SAVINGS" }),
-		tx("trans_save_in", "acc_savings", "2026-10-21T00:00:00Z", 500, { description: "FROM EVERYDAY" }),
+		tx("trans_save_in", "acc_savings", "2026-10-20T03:00:00Z", 500, { description: "FROM EVERYDAY" }),
 		// A repayment to a card Akahu does not see: only a rule can call it a transfer.
 		tx("trans_card", "acc_everyday", "2026-10-25T00:00:00Z", -800, { description: "CREDIT CARD PAYMENT" }),
 		// NZ time: 30 September 23:30 UTC is 1 October in NZ, so it belongs to October.
@@ -111,17 +111,23 @@ test("rules are validated, kept per caller, and change what cash flow counts", a
 	expect(flow.period.start).toBe("2026-08-31T12:00:00.000Z"); // 1 September, NZST
 	const nzd = flow.currencies.find((c: { currency: string }) => c.currency === "NZD");
 	expect(nzd.months).toEqual([
-		{ month: "2026-09", partial: false, income: 0, outgoings: -70, net: -70, transfers_left_out: 0, excluded_by_rules: 0 },
-		{ month: "2026-10", partial: false, income: 4000, outgoings: -2030, net: 1970, transfers_left_out: 3, excluded_by_rules: 0 },
-		{ month: "2026-11", partial: true, income: 0, outgoings: -40, net: -40, transfers_left_out: 0, excluded_by_rules: 0 },
+		{ month: "2026-09", partial: false, income: 0, spending: -70, net: -70, saving: 0, transfers_left_out: 0, excluded_by_rules: 0, top_spending: [{ category: "Uncategorised", amount: 70 }] },
+		{ month: "2026-10", partial: false, income: 4000, spending: -2030, net: 1970, saving: 0, transfers_left_out: 3, excluded_by_rules: 0, top_spending: [{ category: "Uncategorised", amount: 2030 }] },
+		{ month: "2026-11", partial: true, income: 0, spending: -40, net: -40, saving: 0, transfers_left_out: 0, excluded_by_rules: 0, top_spending: [{ category: "Uncategorised", amount: 40 }] },
 	]);
-	expect(nzd.total).toEqual({ income: 4000, outgoings: -2140, net: 1860 });
+	expect(nzd.total).toEqual({ income: 4000, spending: -2140, net: 1860, saving: 0 });
 	expect(flow.currencies.map((c: { currency: string }) => c.currency)).toEqual(["NZD", "USD"]);
 	expect(flow.rules_applied).toEqual([{ rule_id: rule.id, count: 1 }]);
 
 	// Without the rule (Bob's view of the same bank data), the card repayment is money out.
 	const bobOct = (await bob("insights.cashflow", { months: 3 })).currencies[0].months[1];
-	expect(bobOct).toMatchObject({ outgoings: -2830, transfers_left_out: 2 });
+	expect(bobOct).toMatchObject({ spending: -2830, transfers_left_out: 2 });
+
+	// Search shows each row's flow; filtering to one account keeps a transfer's other side.
+	const moved = await alice("transactions.search", { account_id: "acc_everyday", flow: "transfer" });
+	expect(moved.transactions.map((t: { id: string; flow: string }) => [t.id, t.flow])).toEqual([["trans_save_out", "transfer"], ["trans_card", "transfer"]]);
+	expect((await bob("transactions.search", { account_id: "acc_everyday", flow: "transfer" })).transactions.map((t: { id: string }) => t.id)).toEqual(["trans_save_out"]);
+	await expect(alice("transactions.search", { flow: "transfers" })).rejects.toThrow("flow must be one of");
 
 	expect(await alice("memory.removeRule", { rule_id: rule.id })).toEqual({ removed: true });
 	expect(await alice("memory.listRules")).toEqual([]);

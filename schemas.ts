@@ -8,7 +8,7 @@ const TransactionFields = {
 	amount: number(),
 	type: string(),
 	balance: number().optional(),
-	merchant: object({ name: string(), website: string().optional() }).optional(),
+	merchant: object({ _id: string().optional(), name: string(), website: string().optional() }).optional(),
 	category: object({ name: string(), groups: record(object({ name: string() })).optional() }).optional(),
 	meta: object({
 		particulars: string().optional(),
@@ -25,6 +25,8 @@ export const PendingTransaction = object({ ...TransactionFields, updated_at: str
 export type PendingTransaction = Infer<typeof PendingTransaction>;
 export const Account = object({
 	_id: string(),
+	// The classic account an official-open-banking account replaced.
+	_migrated: string().optional(),
 	name: string(),
 	status: string(),
 	type: string(),
@@ -85,6 +87,7 @@ export const Txn = object({
 	other_account: string().optional(),
 	card_suffix: string().optional(),
 	fx: object({ amount: number(), currency: string(), rate: number() }).optional(),
+	flow: string().optional(),
 	note: string().optional(),
 	tags: array(string()).optional(),
 });
@@ -152,8 +155,11 @@ export const CashflowOut = object({
 	period: Interval,
 	currencies: array(object({
 		currency: string(),
-		months: array(object({ month: string(), partial: boolean(), income: number(), outgoings: number(), net: number(), transfers_left_out: number(), excluded_by_rules: number() })),
-		total: object({ income: number(), outgoings: number(), net: number() }),
+		months: array(object({
+			month: string(), partial: boolean(), income: number(), spending: number(), net: number(), saving: number(),
+			transfers_left_out: number(), excluded_by_rules: number(), top_spending: array(object({ category: string(), amount: number() })),
+		})),
+		total: object({ income: number(), spending: number(), net: number(), saving: number() }),
 	})),
 	rules_applied: RulesApplied,
 	unknown_currency_transaction_ids: Currencies,

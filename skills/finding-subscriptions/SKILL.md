@@ -39,4 +39,4 @@ Find regular payments with evidence, and let the user decide what they mean.
   (`memory.setNote`).
 - Akahu cannot cancel anything. Point the user to the provider or their bank.
 - A regular transfer to the user's own savings is not a subscription. If one
-  appears, offer a `transfer` rule (`memory.addRule`) after the user agrees.
+  appears, offer a `transfer` or `saving` rule (`memory.addRule`) after the user agrees.

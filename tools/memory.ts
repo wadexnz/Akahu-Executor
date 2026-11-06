@@ -1,5 +1,5 @@
 import { array, boolean, mutation, number, object, query, router, string, type SqlReader } from "apps";
-import { RULE_KINDS, type Rule, type RuleMatch } from "../analysis.js";
+import { RULE_KINDS, type Rule, type RuleMatch } from "../classify.js";
 import { resolveGroup } from "../categories.js";
 import { Budget } from "../schemas.js";
 import type { Ctx, WriteCtx } from "./context.js";
@@ -133,7 +133,7 @@ const listTags = query(
 const addRule = mutation(
 	{
 		title: "Add an insights rule",
-		description: `Teach the insights how to treat matching transactions. kind transfer: money moving between the user's own accounts that automatic pairing misses (for example a credit card repayment or a KiwiSaver top-up); kind exclude: leave matches out of insights entirely (for example a one-off house deposit). match needs at least one of description, merchant, other_account (case-insensitive substrings; account numbers ignore dashes), account_id (exact) and optionally direction (debit or credit). The first matching rule wins. Rules apply to insights.cashflow, recurring, largeOrUnusual and budgetStatus, which report how many rows each rule matched; they never change search or summary. Only add a rule the user asked for. At most ${MAX_RULES} rules.`,
+		description: `Set the flow of matching transactions, ahead of the automatic classification (as the mobile app's classification rules do). kind spending, income, transfer or saving: for example transfer for a credit card repayment to a card Akahu does not see, saving for a savings app, income for a refund pattern; kind exclude: leave matches out of every insight (for example a one-off house deposit). match needs at least one of description, merchant, other_account (case-insensitive substrings; account numbers ignore dashes), account_id (exact) and optionally direction (debit or credit). The first matching rule wins. Rules decide the flow shown by transactions.search, get and getMany and used by summary's flow filter, insights.cashflow, recurring, largeOrUnusual, budgetStatus and monitor.check; the insights report how many rows each rule matched. Only add a rule the user asked for. At most ${MAX_RULES} rules.`,
 		input: object({ kind: string(), match: Match, reason: string().optional() }),
 		output: RuleOut,
 		annotations: { ...LOCAL, idempotentHint: false },

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { classify, findRecurring, findUnusual, nzDay, nzMonthRange, pairTransfers, type Row } from "./analysis.js";
+import { findRecurring, findUnusual, nzDay, nzMonthRange, type Row } from "./analysis.js";
 
 let n = 0;
 const row = (account: string, date: string, amount: number, extra: Partial<Row> = {}): Row => ({
@@ -15,37 +15,6 @@ test("NZ calendar days and months follow Pacific/Auckland, across daylight savin
 	expect(nzMonthRange("2026-07").start).toBe("2026-06-30T12:00:00.000Z");
 	expect(nzMonthRange("2026-04")).toEqual({ start: "2026-03-31T11:00:00.000Z", end: "2026-04-30T11:59:59.999Z" });
 	expect(nzMonthRange("2026-12").end).toBe("2026-12-31T10:59:59.999Z");
-});
-
-test("transfers pair one debit with the closest same-amount credit in another account within 3 days", () => {
-	const out = row("acc_a", "2026-10-10T00:00:00Z", -500);
-	const near = row("acc_b", "2026-10-11T00:00:00Z", 500);
-	const far = row("acc_c", "2026-10-13T12:00:00Z", 500); // 3.5 days: too far
-	const sameAccount = row("acc_a", "2026-10-10T01:00:00Z", 500);
-	const otherCurrency = row("acc_usd", "2026-10-10T01:00:00Z", 500, { currency: "USD" });
-	const centsOff = row("acc_d", "2026-10-10T02:00:00Z", 500.01);
-	const second = row("acc_a", "2026-10-10T00:00:00Z", -500); // only one credit left in range
-	const paired = pairTransfers([out, near, far, sameAccount, otherCurrency, centsOff, second]);
-	expect([...paired].sort()).toEqual([out._id, near._id].sort());
-});
-
-test("rules win over pairing, and a rule-matched row cannot pair with anything", () => {
-	const repayment = row("acc_everyday", "2026-10-02T00:00:00Z", -300, { description: "CARD REPAYMENT 4111" });
-	const cardCredit = row("acc_card", "2026-10-02T00:00:00Z", 300);
-	const deposit = row("acc_everyday", "2026-10-03T00:00:00Z", -50000, { description: "House deposit" });
-	const coffee = row("acc_everyday", "2026-10-04T00:00:00Z", -6);
-	// Matches both rules: the older one (exclude) wins.
-	const both = row("acc_everyday", "2026-10-05T00:00:00Z", -900, { description: "House deposit by card repayment" });
-	const rules = [
-		{ id: "rule_x", kind: "exclude", match: { description: "house deposit" } },
-		{ id: "rule_t", kind: "transfer", match: { description: "card repayment", direction: "debit" } },
-	];
-	const result = classify([repayment, cardCredit, deposit, coffee, both], rules);
-	expect(result.excluded.map((t) => t._id)).toEqual([deposit._id, both._id]);
-	expect(result.transfers.map((t) => t._id)).toEqual([repayment._id]);
-	// The card's credit stays: its debit side was claimed by the rule, so nothing pairs with it.
-	expect(result.kept.map((t) => t._id)).toEqual([cardCredit._id, coffee._id]);
-	expect(result.rules_applied).toEqual([{ rule_id: "rule_t", count: 1 }, { rule_id: "rule_x", count: 2 }]);
 });
 
 test("recurring payments need a regular cadence; irregular payees and stopped ones are told apart", () => {

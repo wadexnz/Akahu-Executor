@@ -1,9 +1,10 @@
 import { array, boolean, mutation, number, object, query, router, string } from "apps";
-import { classify, daysBetween, findRecurring, findUnusual, nzDay, priced, round } from "../analysis.js";
+import { daysBetween, findRecurring, findUnusual, nzDay, round } from "../analysis.js";
+import { rulesApplied } from "../classify.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { Alert, BalanceHistoryOut, type Account } from "../schemas.js";
-import { client, type Ctx, type WriteCtx } from "./context.js";
-import { loadRules, owner } from "./memory.js";
+import { client, flowsFor, type Ctx, type WriteCtx } from "./context.js";
+import { owner } from "./memory.js";
 
 const STALE_HOURS = 48, UNUSUAL_DAYS = 7, UNUSUAL_MIN = 100, NEW_RECURRING_DAYS = 100, HISTORY_MONTHS = 13, MAX_EVENTS = 100;
 const LOCAL = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
@@ -70,9 +71,10 @@ export const check = mutation(
 		let transaction_checks = "completed", rules_applied: { rule_id: string; count: number }[] = [];
 		try {
 			const rows = await fetchTransactions(c, { start: new Date(now - HISTORY_MONTHS * 30.44 * 864e5).toISOString(), end: new Date(now).toISOString() });
-			const classified = classify(priced(rows, accounts).rows, loadRules(ctx.sql, who));
-			rules_applied = classified.rules_applied;
-			for (const d of findUnusual(classified.kept, { start: new Date(now - UNUSUAL_DAYS * 864e5).toISOString(), end: new Date(now).toISOString(), minAmount: UNUSUAL_MIN })) {
+			const classified = [...flowsFor(ctx, rows, accounts).values()];
+			rules_applied = rulesApplied(classified);
+			const spending = classified.filter((t) => t.flow === "spending");
+			for (const d of findUnusual(spending, { start: new Date(now - UNUSUAL_DAYS * 864e5).toISOString(), end: new Date(now).toISOString(), minAmount: UNUSUAL_MIN })) {
 				candidates.push({
 					key: `unusual_debit:${d.id}`, kind: "unusual_debit", account_id: d.account_id, transaction_id: d.id,
 					message: d.reason === "first_payment_to_payee"
@@ -80,7 +82,7 @@ export const check = mutation(
 						: `${money(d.currency, -d.amount)} to ${d.payee} on ${nzDay(d.date)}: ${d.times_usual} times the usual ${money(d.currency, -(d.usual_amount ?? 0))}.`,
 				});
 			}
-			for (const p of findRecurring(classified.kept, { today, minOccurrences: 3 })) {
+			for (const p of findRecurring(spending, { today, minOccurrences: 3 })) {
 				if (p.status !== "active" || daysBetween(p.first_date, today) > NEW_RECURRING_DAYS) continue;
 				candidates.push({
 					key: `new_recurring:${p.currency}:${p.payee.toLowerCase()}`, kind: "new_recurring", transaction_id: p.evidence_ids.at(-1),

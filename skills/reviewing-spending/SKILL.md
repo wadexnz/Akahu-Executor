@@ -44,8 +44,9 @@ for the expected report style and its limitations.
 - State when period lengths differ. Raw totals are not normalised; a larger
   total alone does not prove a higher spending rate. A null percentage means no
   nonzero baseline, not a 0% change or an infinite increase.
-- Debits include transfers. Mobile rules, transfer pairing and tax-review tags
-  are not used. Never describe a transfer as consumption or savings as an
+- Debits include transfers. Flows (spending, income, transfer, saving) and
+  rules are not used here; use `insights.cashflow` or `transactions.summary` with
+  `flow: spending` for classified spending. Never describe a transfer as consumption or savings as an
   investment return. Positive credits/refunds do not offset these debit totals.
 - An unusual debit meets the disclosed amount heuristic; it is not a fraud,
   subscription or tax finding. If the baseline is insufficient, say the heuristic
