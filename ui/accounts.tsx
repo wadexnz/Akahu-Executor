@@ -110,7 +110,7 @@ function Contributions() {
 	const result = useAppQuery(contributionsAtom);
 	const [open, setOpen] = useState(false);
 	return (
-		<Card title="Investment contributions" aside={<span className="text-sm text-muted">Last 12 months</span>}>
+		<Card title="Investment contributions" aside={<span className="text-sm text-muted">Last 24 months</span>}>
 			<Loaded result={result}>
 				{(data) => data.providers.length === 0 ? <p className="text-sm text-muted">No payments to investment or KiwiSaver providers found.</p> : (
 					<>

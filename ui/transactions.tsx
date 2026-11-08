@@ -7,8 +7,8 @@ import type { addRule, setNote, tag, untag } from "../tools/memory.js";
 import type { decide, previewRule } from "../tools/review.js";
 import type { exportCsv, getTransactions } from "../tools/transactions.js";
 import { AccountOut, CsvOut, DecideOut, NoteOut, PreviewRuleOut, ReviewCasesOut, RuleOut, SearchOut, TagOut, Txn, UntagOut } from "../schemas.js";
-import { reviewAtom } from "./home.js";
-import { client, errorText, FLOW_LABELS, FlowIcon, FlowPill, Icon, Loaded, money, nzDay, nzMidnight, nzToday, signed, weekdayLabel } from "./shared.js";
+import { reviewAtom, toReview } from "./home.js";
+import { addDays, client, errorText, FLOW_LABELS, FlowIcon, FlowPill, Icon, Loaded, money, nzDay, nzMidnight, nzToday, signed, weekdayLabel } from "./shared.js";
 import { transactionIconName } from "./transaction-icon.js";
 
 export const accountsAtom = client.queryAtom(queryReference<typeof listAccounts>("accounts.list"), {}, array(AccountOut));
@@ -35,14 +35,13 @@ const PERIODS = [
 ] as const;
 type PeriodId = (typeof PERIODS)[number]["id"];
 
+// Up to now, from an NZ midnight: no end and a start that stays put all day, so the same
+// period reads the same cached pages. Starts are inclusive.
 function range(period: PeriodId) {
-	const end = new Date().toISOString();
-	if (period === "month") {
-		// Akahu's start is exclusive, so start a millisecond before NZ midnight on the 1st.
-		return { start: new Date(nzMidnight(`${nzToday().slice(0, 7)}-01`) - 1).toISOString(), end };
-	}
+	const today = nzToday();
+	if (period === "month") return { start: new Date(nzMidnight(`${today.slice(0, 7)}-01`)).toISOString() };
 	const days = PERIODS.find((p) => p.id === period)!;
-	return { start: new Date(Date.now() - ("days" in days ? days.days : 30) * 864e5).toISOString(), end };
+	return { start: new Date(nzMidnight(addDays(today, -("days" in days ? days.days : 30)))).toISOString() };
 }
 
 export const accountLabel = (a: Pick<Account, "name" | "number"> | undefined, id: string) =>
@@ -70,7 +69,7 @@ function TransactionRow({ t, account, selected, onSelect }: { t: Row; account?: 
 					<span className="block truncate text-sm text-muted">{sub || "Uncategorised"}{t.note ? " · 📝" : ""}</span>
 				</span>
 				<span className="truncate text-sm text-muted max-sm:hidden">{accountLabel(account, t.account_id)}</span>
-				<span className={`text-right font-medium ${t.amount > 0 ? "text-income" : ""}`}>{signed(t.amount, account?.balance?.currency ?? "NZD")}</span>
+				<span className={`text-right font-medium ${t.amount > 0 ? "text-income" : ""}`}>{signed(t.amount, account?.balance?.currency)}</span>
 				<span className="text-right max-sm:hidden"><FlowPill flow={flow} /></span>
 			</button>
 		</li>
@@ -97,13 +96,21 @@ function DayGroups({ rows, accounts, selected, onSelect }: { rows: Row[]; accoun
 
 function Undo({ previous, onDone }: { previous: Previous; onDone: () => void }) {
 	const [busy, setBusy] = useState(false);
+	const [failure, setFailure] = useState<string>();
 	return (
 		<div className="flex items-center gap-3 rounded-lg bg-ink px-4 py-2.5 text-sm text-bg" role="status">
-			<span className="flex-1">Decision saved</span>
+			<span className="flex-1">{failure ?? "Decision saved"}</span>
 			<button disabled={busy} className="flex items-center gap-1 font-medium" onClick={async () => {
-				setBusy(true);
-				try { await client.mutate(decideRef, { decisions: previous }, DecideOut); } finally { onDone(); }
-			}}><Icon name="Undo2" size={16} />Undo</button>
+				setBusy(true); setFailure(undefined);
+				try {
+					await client.mutate(decideRef, { decisions: previous }, DecideOut);
+					onDone();
+				} catch (e) {
+					// Keep the banner so the user can try again.
+					setFailure(errorText(e, "Couldn't undo. Try again."));
+					setBusy(false);
+				}
+			}}><Icon name="Undo2" size={16} />{failure ? "Retry undo" : "Undo"}</button>
 		</div>
 	);
 }
@@ -164,8 +171,9 @@ function Detail({ t, accounts, onClose }: { t: Row; accounts: Map<string, Accoun
 	const [failure, setFailure] = useState<string>();
 	const [busy, setBusy] = useState(false);
 	useEffect(() => { setNoteText(t.note ?? ""); setRule(false); setUndo(undefined); setFailure(undefined); }, [t.id, t.note]);
-	const account = accounts.get(t.account_id), currency = account?.balance?.currency ?? "NZD";
+	const account = accounts.get(t.account_id), currency = account?.balance?.currency;
 	const flow = t.flow ?? (t.amount < 0 ? "spending" : "income");
+	// Cases include the user's decisions, so re-deciding a decided pair changes both sides.
 	const found: Case | undefined = review.data?.cases.find((k) => k.transactions.some((x) => x.id === t.id));
 	const other = found?.transactions.find((x) => x.id !== t.id) ?? found?.evidence;
 	const act = async (work: () => Promise<unknown>, fallback: string) => {
@@ -251,9 +259,9 @@ function ReviewList({ accounts, selected, onSelect }: { accounts: Map<string, Ac
 	const review = useAppQuery(reviewAtom);
 	return (
 		<Loaded result={review} height="h-40">
-			{(data) => data.cases.length === 0 ? <p className="px-2 py-6 text-muted">Nothing to review. Every flow in the last 90 days is either certain or your own decision.</p> : (
+			{(data) => toReview(data).length === 0 ? <p className="px-2 py-6 text-muted">Nothing to review. Every flow in the last 90 days is either certain or your own decision.</p> : (
 				<ul className="flex flex-col gap-3">
-					{data.cases.map((k) => (
+					{toReview(data).map((k) => (
 						<li key={k.id} className="rounded-lg border border-line p-2">
 							<p className="flex items-center gap-1.5 px-2 pt-1 text-sm text-warning"><Icon name="Info" size={16} />{k.explanation}</p>
 							<ul>
@@ -273,7 +281,8 @@ async function download(filters: object) {
 	const url = URL.createObjectURL(new Blob([file.csv], { type: "text/csv" }));
 	const a = Object.assign(document.createElement("a"), { href: url, download: file.filename });
 	a.click();
-	URL.revokeObjectURL(url);
+	// Revoking straight after click() can cancel the download in some browsers.
+	setTimeout(() => URL.revokeObjectURL(url), 60_000);
 	return file;
 }
 
@@ -286,7 +295,8 @@ export function Transactions({ view, go }: { view: "all" | "review"; go: (path: 
 	const [accountId, setAccountId] = useState<string>();
 	const [text, setText] = useState("");
 	const [filtering, setFiltering] = useState(false);
-	const [selectedId, setSelectedId] = useState<string>();
+	// The picked row is kept, so its detail (and Undo) stays open when a decision moves it out of both lists.
+	const [picked, setPicked] = useState<Row>();
 	const [exportState, setExportState] = useState<string>();
 	const filters = useMemo(() => ({ ...range(period), ...(flow && { flow }), ...(accountId && { account_id: accountId }) }), [period, flow, accountId]);
 	const searchAtom = useMemo(() => client.queryAtom(searchRef, { ...filters, limit: 1000 }, SearchOut), [filters]);
@@ -294,8 +304,10 @@ export function Transactions({ view, go }: { view: "all" | "review"; go: (path: 
 	const needle = text.trim().toLowerCase();
 	const rows = (search.data?.transactions ?? []).filter((t) => !needle || [t.description, t.merchant, t.category].some((v) => v?.toLowerCase().includes(needle)));
 	const all = [...(search.data?.transactions ?? []), ...(review.data?.cases.flatMap((k) => k.transactions) ?? [])];
-	const selected = all.find((t) => t.id === selectedId);
-	const reviewCount = review.data?.cases.length;
+	const live = all.find((t) => t.id === picked?.id);
+	useEffect(() => { if (live) setPicked(live); }, [live]);
+	const selected = live ?? picked, selectedId = selected?.id;
+	const reviewCount = review.data && toReview(review.data).length;
 	const seg = (on: boolean) => `rounded-md px-3 py-1.5 text-sm ${on ? "bg-bg font-medium shadow-[0_0_0_1px_var(--line)]" : "text-muted"}`;
 	return (
 		<div className={`grid gap-0 ${selected ? "lg:grid-cols-[1fr_400px]" : ""}`}>
@@ -315,7 +327,7 @@ export function Transactions({ view, go }: { view: "all" | "review"; go: (path: 
 							<button className="flex items-center gap-1.5 rounded-lg border border-primary px-3 py-2 text-sm font-medium text-primary disabled:opacity-50" disabled={exportState === "Exporting…"}
 								onClick={async () => {
 									setExportState("Exporting…");
-									try { const f = await download(filters); setExportState(`Downloaded ${f.rows} rows${f.truncated ? " (truncated)" : ""}`); } catch (e) { setExportState(errorText(e, "Couldn't export")); }
+									try { const f = await download({ ...filters, ...(needle && { text: needle }) }); setExportState(`Downloaded ${f.rows} rows${f.truncated ? " (truncated)" : ""}`); } catch (e) { setExportState(errorText(e, "Couldn't export")); }
 								}}>
 								<Icon name="Download" size={16} />Export CSV
 							</button>
@@ -354,18 +366,18 @@ export function Transactions({ view, go }: { view: "all" | "review"; go: (path: 
 						</label>
 					</div>
 				)}
-				{view === "review" ? <ReviewList accounts={byId} selected={selectedId} onSelect={(t) => setSelectedId(t.id)} /> : (
+				{view === "review" ? <ReviewList accounts={byId} selected={selectedId} onSelect={setPicked} /> : (
 					<Loaded result={search} height="h-64">
 						{(data) => rows.length === 0 ? <p className="px-2 py-6 text-muted">No transactions match.</p> : (
 							<>
-								<DayGroups rows={rows} accounts={byId} selected={selectedId} onSelect={(t) => setSelectedId(t.id)} />
+								<DayGroups rows={rows} accounts={byId} selected={selectedId} onSelect={setPicked} />
 								{data.truncated && <p className="text-sm text-muted">Showing the newest {data.count}. Narrow the period to see older ones.</p>}
 							</>
 						)}
 					</Loaded>
 				)}
 			</div>
-			{selected && <Detail t={selected} accounts={byId} onClose={() => setSelectedId(undefined)} />}
+			{selected && <Detail t={selected} accounts={byId} onClose={() => setPicked(undefined)} />}
 		</div>
 	);
 }

@@ -55,8 +55,8 @@ Executor stores the tokens and only adds them to HTTPS requests to
 | `admin.reportEnrichmentIssue` | Report a wrong merchant/category or a duplicate to Akahu | Every call |
 
 Only the two `admin` tools change anything at Akahu, and none can make payments
-(Personal Apps cannot). The `memory` and `monitor` tools write only to this
-app's own database. Each tool declares MCP annotations and an output schema.
+(Personal Apps cannot). The `memory` and `monitor` tools and `review.decide`
+write only to this app's own database. Each tool declares MCP annotations and an output schema.
 An approval covers the exact arguments shown, so approving a name-only
 `identity.parties` call does not approve reading the IRD number.
 
@@ -100,17 +100,22 @@ date) would be dropped.
 ## Freshness, caching and rate limits
 
 - Account lists are cached for 5 minutes and settled transaction pages for 15,
-  per connected Akahu account, using Executor's app cache. Pending transactions,
+  per connected Akahu account, using Executor's app cache. Default ranges run
+  from an NZ midnight up to now with no end, so repeated reads during a day
+  share cached pages. Pending transactions,
   single or batch lookups, `accounts.get` and identity data are always fetched live.
 - `admin.refresh` starts a new cache generation, so nothing cached before the
-  refresh request is served afterwards. Akahu still needs time to sync the bank.
+  refresh request is served afterwards. Akahu still needs minutes to sync the
+  bank, so reads straight after a refresh can still be from before it.
+  Transaction pages are also keyed by the accounts' latest sync time, so once
+  the account list shows the new sync (within 5 minutes), they are read again.
 - Reads that Akahu rate-limits (429) are retried up to three times with jittered
   exponential backoff, or after `Retry-After` (capped at 10 seconds). A
   rate-limited refresh is reported, not retried.
 - Akahu failures surface as Executor `ProviderError`s: 401 `unauthorized`
   (revoked or rotated token), 403 `rejected` (app ID, permissions or IP
   allow-list), 429 `rate_limited` and 5xx `unavailable`. Response bodies are
-  never passed on.
+  not passed on, except a 400's `message`, which names the bad input.
 - If the cache is unavailable (as in the local test host), tools read Akahu
   directly instead of failing.
 

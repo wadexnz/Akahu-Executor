@@ -11,7 +11,9 @@ import { categoryIconName } from "./transaction-icon.js";
 
 export const cashflowAtom = client.queryAtom(queryReference<typeof cashflow>("insights.cashflow"), { months: 6 }, CashflowOut);
 export const netWorthAtom = client.queryAtom(queryReference<typeof netWorth>("accounts.netWorth"), {}, NetWorthOut);
-export const reviewAtom = client.queryAtom(queryReference<typeof cases>("review.cases"), { include_reviewed: false }, ReviewCasesOut);
+// With the user's decisions, so a decided pair can be changed as a pair; toReview drops them.
+export const reviewAtom = client.queryAtom(queryReference<typeof cases>("review.cases"), { include_reviewed: true }, ReviewCasesOut);
+export const toReview = (data: Infer<typeof ReviewCasesOut>) => data.cases.filter((k) => k.reason !== "reviewed");
 const recurringAtom = client.queryAtom(queryReference<typeof recurring>("insights.recurring"), { months: 13, min_occurrences: 3 }, RecurringOut);
 
 const UPCOMING_DAYS = 14;
@@ -68,7 +70,7 @@ function Hero({ flow, month, picker }: { flow: Flow; month: string; picker: Reac
 
 function ReviewBanner({ onReview }: { onReview: () => void }) {
 	const review = useAppQuery(reviewAtom);
-	const n = review.data?.cases.length ?? 0;
+	const n = review.data ? toReview(review.data).length : 0;
 	if (!n) return null;
 	return (
 		<button onClick={onReview} className="flex w-full items-center gap-3 rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-left">

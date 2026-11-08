@@ -90,6 +90,8 @@ export async function post(c: Akahu, path: string, body?: unknown): Promise<void
 // example the local test host) only costs extra requests; it never fails a tool.
 const Generation = ["generation"];
 
+const isCacheError = (error: unknown) => (error as { _tag?: unknown } | null)?._tag === "CacheError";
+
 async function cached<T>(c: Akahu, key: (string | null)[], schema: Schema<T, boolean>, freshFor: CacheGetOptions<T>["freshFor"], load: (c: Akahu) => Promise<T>) {
 	const cache = c.cache;
 	if (!cache) return load(c);
@@ -100,7 +102,7 @@ async function cached<T>(c: Akahu, key: (string | null)[], schema: Schema<T, boo
 			load: ({ fetch, signal }) => load({ ...c, fetch, signal }),
 		});
 	} catch (error) {
-		if ((error as { _tag?: unknown } | null)?._tag === "CacheError") return load(c);
+		if (isCacheError(error)) return load(c);
 		throw error;
 	}
 }
@@ -111,7 +113,7 @@ export async function invalidateCache(c: Akahu) {
 		const generation = (await c.cache.read(Generation, number())) ?? 0;
 		await c.cache.write([{ key: Generation, value: generation + 1 }], "7 days");
 	} catch (error) {
-		if ((error as { _tag?: unknown } | null)?._tag !== "CacheError") throw error;
+		if (!isCacheError(error)) throw error;
 	}
 }
 
@@ -130,8 +132,28 @@ function exclusiveStart(start: string) {
 
 const Page = object({ items: array(Transaction), next: string().optional() });
 
+// The latest transaction sync across accounts. Transaction pages are keyed by it, so pages
+// read while a requested refresh is still syncing are not served once the sync lands.
+async function lastSync(c: Akahu) {
+	// Without a working cache nothing is kept, so there is nothing to key (and no read to spend).
+	if (!c.cache) return "";
+	try {
+		await c.cache.read(Generation, number());
+	} catch (error) {
+		if (isCacheError(error)) return "";
+		throw error;
+	}
+	let latest = "";
+	for (const a of await fetchAccounts(c)) {
+		const at = a.refreshed?.transactions;
+		if (at !== undefined && at > latest) latest = at;
+	}
+	return latest;
+}
+
 // Page through settled transactions. `filter` runs per page so `limit` counts
-// matches, not raw rows. Each raw page is cached for 15 minutes.
+// matches, not raw rows. Each raw page is cached for 15 minutes or until the next sync.
+// Omit `end` for "up to now": an end that moves with the clock never hits the cache.
 export async function fetchTransactions(
 	c: Akahu,
 	range: { start?: string; end?: string },
@@ -141,9 +163,10 @@ export async function fetchTransactions(
 	const query = { start: range.start === undefined ? undefined : exclusiveStart(range.start), end: range.end };
 	const matched: Transaction[] = [];
 	const seen = new Set<string>();
+	const synced = await lastSync(c);
 	let cursor: string | undefined;
 	do {
-		const page = await cached(c, ["transactions", path, query.start ?? null, query.end ?? null, cursor ?? null], Page, "15 minutes", async (c) => {
+		const page = await cached(c, ["transactions", path, query.start ?? null, query.end ?? null, cursor ?? null, synced], Page, "15 minutes", async (c) => {
 			const body = await decode(await send(c, url(path, { ...query, cursor })), object({
 				items: array(Transaction), cursor: object({ next: jsonValue().optional() }).optional(),
 			}));

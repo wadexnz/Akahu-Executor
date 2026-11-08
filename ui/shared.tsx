@@ -17,10 +17,12 @@ export const monthLabel = (month: string, style: "long" | "short" = "long") => u
 export const dayLabel = (day: string) => utc(`${day}T00:00:00Z`, { day: "numeric", month: "short" });
 export const weekdayLabel = (day: string) => utc(`${day}T00:00:00Z`, { weekday: "short", day: "numeric", month: "short" });
 
-export const money = (n: number, currency: string, digits = 2) =>
-	new Intl.NumberFormat("en-NZ", { style: "currency", currency, currencyDisplay: "narrowSymbol", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
+// An unknown currency (an account without a balance, or before accounts load) shows the bare
+// number rather than passing it off as NZD.
+export const money = (n: number, currency: string | undefined, digits = 2) =>
+	new Intl.NumberFormat("en-NZ", { ...(currency && { style: "currency", currency, currencyDisplay: "narrowSymbol" }), minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 // Money in shows a plus, money out a minus, as on the phone.
-export const signed = (n: number, currency: string) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n), currency)}`;
+export const signed = (n: number, currency: string | undefined) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(Math.abs(n), currency)}`;
 export const compact = (n: number, currency: string) =>
 	new Intl.NumberFormat("en-NZ", { style: "currency", currency, currencyDisplay: "narrowSymbol", notation: "compact", maximumFractionDigits: 1 }).format(n);
 

@@ -1,5 +1,5 @@
 import { array, boolean, mutation, number, object, query, router, string } from "apps";
-import { nzDay, priced, round } from "../analysis.js";
+import { nzDay, nzDaysBefore, priced, round } from "../analysis.js";
 import { classify, FLOWS, REVIEW_REASONS, reviewCases, ruleMatches, type Classified } from "../classify.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { DecideOut, DecisionChoice, Interval, Match, PreviewRuleOut, ReviewCasesOut } from "../schemas.js";
@@ -11,11 +11,12 @@ const MAX_DECISIONS = 100;
 // needs it: it lets a decision carried over from a migrated classic transaction apply again).
 const CHOICES: readonly string[] = [...FLOWS, "automatic", "unset"];
 
+// The reported range, and what to read: a default end is "up to now", left open so cached pages are shared.
 function period(start: string | undefined, end: string | undefined, days: number) {
 	const now = Date.now();
-	const range = { start: start ?? new Date(now - days * 864e5).toISOString(), end: end ?? new Date(now).toISOString() };
+	const range = { start: start ?? nzDaysBefore(now, days), end: end ?? new Date(now).toISOString() };
 	for (const [name, value] of Object.entries(range)) if (Number.isNaN(Date.parse(value))) throw new Error(`${name} is not a valid ISO 8601 timestamp: ${value}`);
-	return range;
+	return { range, read: { start: range.start, end } };
 }
 
 const caseRow = (t: Classified) => ({ ...txn(t), flow: t.flow, currency: t.currency });
@@ -29,8 +30,8 @@ export const cases = query(
 		annotations: READ,
 	},
 	async (ctx: Ctx, i) => {
-		const range = period(i.start, i.end, 90), c = client(ctx);
-		const accounts = await fetchAccounts(c), all = await fetchTransactions(c, range);
+		const { range, read } = period(i.start, i.end, 90), c = client(ctx);
+		const accounts = await fetchAccounts(c), all = await fetchTransactions(c, read);
 		const rows = [...flowsFor(ctx, all, accounts).values()];
 		const from = Date.parse(range.start), to = Date.parse(range.end);
 		const inScope = (t: Classified) => (i.account_id === undefined || t._account === i.account_id) && Date.parse(t.date) >= from && Date.parse(t.date) <= to;
@@ -91,8 +92,8 @@ export const previewRule = query(
 	},
 	async (ctx: Ctx, i) => {
 		const match = cleanRule(i.kind, i.match);
-		const range = period(i.start, i.end, 365), c = client(ctx), who = owner(ctx);
-		const accounts = await fetchAccounts(c), rows = priced(await fetchTransactions(c, range), accounts).rows;
+		const { range, read } = period(i.start, i.end, 365), c = client(ctx), who = owner(ctx);
+		const accounts = await fetchAccounts(c), rows = priced(await fetchTransactions(c, read), accounts).rows;
 		const rules = loadRules(ctx.sql, who), decisions = loadDecisions(ctx.sql, who);
 		const candidate = { id: "rule_preview", kind: i.kind, match };
 		const before = new Map(classify(rows, accounts, rules, decisions).map((t) => [t._id, t]));

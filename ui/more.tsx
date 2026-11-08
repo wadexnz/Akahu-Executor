@@ -6,7 +6,7 @@ import type { budgetStatus } from "../tools/insights.js";
 import type { listRules, removeRule, setBudget } from "../tools/memory.js";
 import type { acknowledge, listAlerts } from "../tools/monitor.js";
 import { Alert, Budget, BudgetStatusOut, RemovedOut, RuleOut } from "../schemas.js";
-import { Card, client, dayLabel, errorText, FLOW_LABELS, Icon, Loaded, money, monthLabel } from "./shared.js";
+import { Card, client, dayLabel, errorText, FLOW_LABELS, Icon, Loaded, money, monthLabel, nzDay } from "./shared.js";
 
 const rulesAtom = client.queryAtom(queryReference<typeof listRules>("memory.listRules"), {}, array(RuleOut));
 export const alertsAtom = client.queryAtom(queryReference<typeof listAlerts>("monitor.alerts"), { include_acknowledged: false, limit: 50 }, array(Alert));
@@ -162,7 +162,7 @@ function Alerts() {
 							<li key={a.id} className="flex items-start gap-3 py-3">
 								<Icon name="Bell" size={18} className="mt-0.5 text-warning" />
 								<div className="min-w-0 flex-1">
-									<div className="text-xs font-medium tracking-wide text-muted uppercase">{a.kind.replaceAll("_", " ")} · {dayLabel(a.created_at.slice(0, 10))}</div>
+									<div className="text-xs font-medium tracking-wide text-muted uppercase">{a.kind.replaceAll("_", " ")} · {dayLabel(nzDay(a.created_at))}</div>
 									<p className="mt-0.5 text-sm">{a.message}</p>
 								</div>
 								<button className="shrink-0 rounded-md border border-line px-2.5 py-1 text-xs" onClick={() => seen([a.id])}>Mark seen</button>

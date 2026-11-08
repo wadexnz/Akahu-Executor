@@ -29,8 +29,11 @@ async function flowsAround(ctx: Ctx, rows: readonly Transaction[]) {
 	return flowsFor(ctx, [...history, ...rows.filter((t) => !ids.has(t._id))], await fetchAccounts(c));
 }
 
+// "excluded" picks rows the user's rules leave out of insights.
+const FLOW_FILTERS: readonly string[] = [...FLOWS, "excluded"];
+
 function flowFilter(flow: string | undefined) {
-	if (flow !== undefined && !(FLOWS as readonly string[]).includes(flow)) throw new Error(`flow must be one of ${FLOWS.join(", ")}`);
+	if (flow !== undefined && !FLOW_FILTERS.includes(flow)) throw new Error(`flow must be one of ${FLOW_FILTERS.join(", ")}`);
 	return flow;
 }
 
@@ -42,6 +45,7 @@ const Filters = {
 	category: string().optional(),
 	merchant: string().optional(),
 	description: string().optional(),
+	text: string().optional(),
 	group: string().optional(),
 	tag: string().optional(),
 	min_amount: number().optional(),
@@ -69,6 +73,7 @@ async function filtered(ctx: Ctx, i: Infer<typeof FilterInput>) {
 		(i.category === undefined || (t.category !== undefined && has(t.category.name, i.category))) &&
 		(i.merchant === undefined || (t.merchant !== undefined && has(t.merchant.name, i.merchant))) &&
 		has(t.description, i.description) &&
+		(i.text === undefined || [t.description, t.merchant?.name, t.category?.name].some((v) => v !== undefined && has(v, i.text))) &&
 		(group === undefined || groupOf(t) === group) &&
 		(tagged === undefined || tagged.has(t._id)) &&
 		(i.min_amount === undefined || Math.abs(t.amount) >= i.min_amount) &&
@@ -80,7 +85,7 @@ export const getTransactions = query(
 	{
 		title: "Get transactions",
 		description:
-			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Each row has its flow, as in the mobile app: spending, income, transfer (between the user's own accounts), saving (KiwiSaver, investments, savings providers) or excluded (by the user's rule); flow filters by it. Flows are worked out across every account within start/end, so give a range when you can. Rows carry the user's note and tags when they have any.",
+			"Settled transactions, newest first, with merchant, category and enrichment (particulars/code/reference/other_account/card_suffix/fx). Optional filters: start/end (inclusive ISO 8601 timestamps; omit for all available history), account_id, type (exact, e.g. EFTPOS), category/merchant/description (case-insensitive substring), text (substring of any of description, merchant or category, like the dashboard's search box), group (personal-finance category group such as Food or Transport; see categories.list), tag (one of the user's memory tags), min_amount/max_amount (absolute value in each account's currency), limit (default 500). Amounts are negative for money out. currencies contains net totals of returned rows only, separated by account currency with no FX conversion. unknown_currency_transaction_ids identifies returned rows excluded from totals because currency is unavailable. Each row has its flow, as in the mobile app: spending, income, transfer (between the user's own accounts), saving (KiwiSaver, investments, savings providers) or excluded (by the user's rule); flow filters by it. Flows are worked out across every account within start/end, so give a range when you can. Rows carry the user's note and tags when they have any.",
 		input: object({
 			...Filters,
 			limit: number().default(500),

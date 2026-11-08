@@ -66,7 +66,9 @@ function memoryCache(loaderFetch: Akahu["fetch"]) {
 		invalidate: async (key) => { store.delete(JSON.stringify(key)); },
 		forAccount: () => cache,
 	};
-	return cache;
+	// Drop entries whose key starts with `name`, as if they had expired.
+	const expire = (name: string) => { for (const k of store.keys()) if (k.startsWith(`[${JSON.stringify(name)},`)) store.delete(k); };
+	return Object.assign(cache, { expire });
 }
 
 test("accounts and transaction pages are cached until a refresh request invalidates them", async () => {
@@ -94,6 +96,21 @@ test("accounts and transaction pages are cached until a refresh request invalida
 		"GET /v1/transactions?start=2026-09-30T23%3A59%3A59.999Z&end=2026-10-31T23%3A59%3A59.999Z",
 		"GET /v1/transactions?start=2026-09-30T23%3A59%3A59.999Z&end=2026-10-31T23%3A59%3A59.999Z&cursor=p2",
 	]);
+});
+
+test("pages read while a refresh is still syncing are replaced once accounts show the new sync", async () => {
+	const accounts = (synced: string) => Response.json({ items: [{ ...account, refreshed: { transactions: synced } }] });
+	const page = (id: string) => Response.json({ items: [row(id)], cursor: { next: null } });
+	const { c, requests } = akahu(accounts("2026-11-08T01:00:00Z"), page("trans_old"), accounts("2026-11-08T02:00:00Z"), page("trans_new"));
+	const cache = memoryCache(c.fetch), cached = { ...c, cache };
+	// No end: "up to now" is the same key on every read.
+	const range = { start: "2026-10-01T00:00:00Z" };
+	const ids = async () => (await fetchTransactions(cached, range)).map((t) => t._id);
+	expect([await ids(), await ids()]).toEqual([["trans_old"], ["trans_old"]]);
+	expect(requests).toEqual(["GET /v1/accounts", "GET /v1/transactions?start=2026-09-30T23%3A59%3A59.999Z"]);
+	cache.expire("accounts");
+	expect(await ids()).toEqual(["trans_new"]);
+	expect(requests).toHaveLength(4);
 });
 
 test("an unavailable cache falls back to Akahu, but loader failures still fail", async () => {

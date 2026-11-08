@@ -43,6 +43,10 @@ export function nzStartOf(day: string) {
 	throw new Error(`Not a calendar day: ${day}`);
 }
 
+// The start of the NZ day `days` days before the day of `now`. Default range starts use it so
+// they stay the same all day and repeated reads share cached Akahu pages.
+export const nzDaysBefore = (now: number, days: number) => nzStartOf(addDays(nzDay(now), -days));
+
 // The inclusive instant range of an NZ calendar month.
 export function nzMonthRange(month: string) {
 	return { start: nzStartOf(`${month}-01`), end: new Date(Date.parse(nzStartOf(`${addMonths(month, 1)}-01`)) - 1).toISOString() };

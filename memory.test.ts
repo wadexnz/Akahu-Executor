@@ -128,6 +128,14 @@ test("rules are validated, kept per caller, and change what cash flow counts", a
 	expect(moved.transactions.map((t: { id: string; flow: string }) => [t.id, t.flow])).toEqual([["trans_save_out", "transfer"], ["trans_card", "transfer"]]);
 	expect((await bob("transactions.search", { account_id: "acc_everyday", flow: "transfer" })).transactions.map((t: { id: string }) => t.id)).toEqual(["trans_save_out"]);
 	await expect(alice("transactions.search", { flow: "transfers" })).rejects.toThrow("flow must be one of");
+	// "excluded" picks what an exclude rule leaves out, on search and summary alike.
+	const hidden = await alice("memory.addRule", { kind: "exclude", match: { description: "usd thing" } });
+	expect((await alice("transactions.search", { flow: "excluded" })).transactions.map((t: { id: string }) => t.id)).toEqual(["trans_usd"]);
+	expect((await alice("transactions.summary", { flow: "excluded" })).currencies.map((c: { currency: string; transaction_count: number }) => [c.currency, c.transaction_count])).toEqual([["USD", 1]]);
+	await alice("memory.removeRule", { rule_id: hidden.id });
+	// text matches description, merchant or category, as the dashboard's search box; the CSV export takes it too.
+	expect((await alice("transactions.search", { text: "Savings" })).transactions.map((t: { id: string }) => t.id)).toEqual(["trans_save_out"]);
+	expect((await alice("transactions.exportCsv", { text: "savings" })).rows).toBe(1);
 
 	expect(await alice("memory.removeRule", { rule_id: rule.id })).toEqual({ removed: true });
 	expect(await alice("memory.listRules")).toEqual([]);

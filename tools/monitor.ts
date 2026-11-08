@@ -1,5 +1,5 @@
 import { array, boolean, mutation, number, object, query, router, string } from "apps";
-import { daysBetween, findRecurring, findUnusual, nzDay, round } from "../analysis.js";
+import { addDays, daysBetween, findRecurring, findUnusual, nzDay, nzDaysBefore, round } from "../analysis.js";
 import { rulesApplied } from "../classify.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { Alert, BalanceHistoryOut, type Account } from "../schemas.js";
@@ -70,7 +70,7 @@ export const check = mutation(
 		// Transaction alerts. A failed history read still saves balances and balance alerts.
 		let transaction_checks = "completed", rules_applied: { rule_id: string; count: number }[] = [];
 		try {
-			const rows = await fetchTransactions(c, { start: new Date(now - HISTORY_MONTHS * 30.44 * 864e5).toISOString(), end: new Date(now).toISOString() });
+			const rows = await fetchTransactions(c, { start: nzDaysBefore(now, Math.round(HISTORY_MONTHS * 30.44)) });
 			const classified = [...flowsFor(ctx, rows, accounts).values()];
 			rules_applied = rulesApplied(classified);
 			const spending = classified.filter((t) => t.flow === "spending");
@@ -212,7 +212,7 @@ export const balanceHistory = query(
 	},
 	async (ctx: Ctx, i) => {
 		if (!Number.isInteger(i.days) || i.days < 1 || i.days > 730) throw new Error("days must be a whole number from 1 to 730");
-		const to = nzDay(Date.now()), from = nzDay(Date.now() - (i.days - 1) * 864e5);
+		const to = nzDay(Date.now()), from = addDays(to, -(i.days - 1));
 		const rows = ctx.sql.exec<{ account_id: string; day: string; currency: string; current: number; available: number }>(
 			"SELECT account_id, day, currency, current, available FROM balance_snapshots WHERE owner = ? AND day >= ? AND day <= ? AND (? IS NULL OR account_id = ?) ORDER BY account_id, day",
 			owner(ctx), from, to, i.account_id ?? null, i.account_id ?? null,

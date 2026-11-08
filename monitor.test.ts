@@ -31,7 +31,7 @@ function akahu() {
 		})) });
 		if (url.pathname === "/v1/transactions") {
 			if (bank.failTransactions) return Response.json({ success: false, message: "down" }, { status: 503 });
-			const start = Date.parse(url.searchParams.get("start")!), end = Date.parse(url.searchParams.get("end")!);
+			const start = Date.parse(url.searchParams.get("start")!), end = url.searchParams.has("end") ? Date.parse(url.searchParams.get("end")!) : Infinity;
 			return Response.json({ success: true, items: bank.rows.filter((t) => Date.parse(t.date) > start && Date.parse(t.date) <= end), cursor: { next: null } });
 		}
 		throw new Error(`Unexpected ${url.pathname}`);
@@ -136,6 +136,9 @@ test("balance history keeps one snapshot per NZ day and totals each currency sep
 	]);
 	expect((await alice("monitor.balanceHistory", { account_id: "acc_usd" })).value.accounts.map((a: { account_id: string }) => a.account_id)).toEqual(["acc_usd"]);
 	await expect(alice("monitor.balanceHistory", { days: 0 })).rejects.toThrow("days must be");
+	// 00:30 on 28 September, just after the 23-hour day: two days are the 27th and 28th, not three.
+	at("2026-09-27T11:30:00Z");
+	expect((await alice("monitor.balanceHistory", { days: 2 })).value).toMatchObject({ from: "2026-09-27", to: "2026-09-28" });
 });
 
 test("transaction and feed alerts are raised once; a failed history read still saves balances", async () => {

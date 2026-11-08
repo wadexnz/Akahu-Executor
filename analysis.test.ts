@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { findRecurring, findUnusual, nzDay, nzMonthRange, type Row } from "./analysis.js";
+import { findRecurring, findUnusual, nzDay, nzDaysBefore, nzMonthRange, nzStartOf, type Row } from "./analysis.js";
 
 let n = 0;
 const row = (account: string, date: string, amount: number, extra: Partial<Row> = {}): Row => ({
@@ -15,6 +15,14 @@ test("NZ calendar days and months follow Pacific/Auckland, across daylight savin
 	expect(nzMonthRange("2026-07").start).toBe("2026-06-30T12:00:00.000Z");
 	expect(nzMonthRange("2026-04")).toEqual({ start: "2026-03-31T11:00:00.000Z", end: "2026-04-30T11:59:59.999Z" });
 	expect(nzMonthRange("2026-12").end).toBe("2026-12-31T10:59:59.999Z");
+	// The clock-change days themselves: 5 April 2026 lasts 25 hours, 27 September 23.
+	expect([nzStartOf("2026-04-05"), nzStartOf("2026-04-06")]).toEqual(["2026-04-04T11:00:00.000Z", "2026-04-05T12:00:00.000Z"]);
+	expect([nzDay("2026-04-05T11:59:59.999Z"), nzDay("2026-04-05T12:00:00Z")]).toEqual(["2026-04-05", "2026-04-06"]);
+	expect([nzStartOf("2026-09-27"), nzStartOf("2026-09-28")]).toEqual(["2026-09-26T12:00:00.000Z", "2026-09-27T11:00:00.000Z"]);
+	expect([nzDay("2026-09-27T10:59:59.999Z"), nzDay("2026-09-27T11:00:00Z")]).toEqual(["2026-09-27", "2026-09-28"]);
+	// Default range starts are the same all NZ day (so repeated reads share cached pages), from its first to last millisecond.
+	expect([nzDaysBefore(Date.parse("2026-09-27T11:00:00Z"), 1), nzDaysBefore(Date.parse("2026-09-28T10:59:59.999Z"), 1)]).toEqual(["2026-09-26T12:00:00.000Z", "2026-09-26T12:00:00.000Z"]);
+	expect(nzDaysBefore(Date.parse("2026-11-08T03:00:00Z"), 90)).toBe("2026-08-09T12:00:00.000Z");
 });
 
 test("recurring payments need a regular cadence; irregular payees and stopped ones are told apart", () => {

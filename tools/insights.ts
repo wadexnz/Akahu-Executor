@@ -1,6 +1,6 @@
 import { array, boolean, number, object, query, router, string, type ElicitationResponse, type FormElicitation } from "apps";
 import {
-	addMonths, findRecurring, findUnusual, groupOf, nzDay, nzMonthRange, payeeKey, payeeName, priced, round,
+	addMonths, findRecurring, findUnusual, groupOf, nzDay, nzDaysBefore, nzMonthRange, payeeKey, payeeName, priced, round,
 } from "../analysis.js";
 import { fetchAccounts, fetchTransactions } from "../client.js";
 import { compareInsights } from "../compare.js";
@@ -72,7 +72,8 @@ const reviewSpending = query(
 
 // Settled rows for a range, in their accounts' currencies, each with its flow. Every account is
 // classified together (so a transfer keeps its other side), then narrowed to accountIds.
-async function settled(ctx: Ctx, range: { start: string; end: string }, accountIds?: readonly string[]) {
+// Pass no end for "up to now" (see fetchTransactions).
+async function settled(ctx: Ctx, range: { start: string; end?: string }, accountIds?: readonly string[]) {
 	const c = client(ctx);
 	const accounts = await fetchAccounts(c);
 	const all = await fetchTransactions(c, range);
@@ -99,7 +100,7 @@ function instant(value: string, name: string) {
 	return ms;
 }
 
-const monthsBack = (now: number, months: number) => new Date(now - months * 30.44 * 864e5).toISOString();
+const monthsBack = (now: number, months: number) => nzDaysBefore(now, Math.round(months * 30.44));
 
 export const recurring = query(
 	{
@@ -113,7 +114,7 @@ export const recurring = query(
 		const months = wholeNumber(i.months, "months", 2, 24), minOccurrences = wholeNumber(i.min_occurrences, "min_occurrences", 2, 24);
 		const now = Date.now();
 		const period = { start: monthsBack(now, months), end: new Date(now).toISOString() };
-		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_id === undefined ? undefined : [i.account_id]);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: period.start }, i.account_id === undefined ? undefined : [i.account_id]);
 		const payments = findRecurring(ofFlow(rows, "spending"), { today: nzDay(now), minOccurrences });
 		const totals = new Map<string, { currency: string; active_count: number; active_monthly_equivalent: number }>();
 		for (const p of payments) {
@@ -141,7 +142,7 @@ export const cashflow = query(
 		const current = nzDay(now).slice(0, 7);
 		const list = Array.from({ length: months }, (_, n) => addMonths(current, n - months + 1));
 		const period = { start: nzMonthRange(list[0]!).start, end: new Date(now).toISOString() };
-		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_ids);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: period.start }, i.account_ids);
 		type Month = { income: number; spending: number; saving: number; transfers_left_out: number; excluded_by_rules: number; categories: Map<string, number> };
 		const byCurrency = new Map<string, Map<string, Month>>();
 		for (const t of rows) {
@@ -198,7 +199,7 @@ const merchantHistory = query(
 		const needle = i.merchant.trim().toLowerCase();
 		const now = Date.now();
 		const period = { start: monthsBack(now, months), end: new Date(now).toISOString() };
-		const { rows, unknown_currency_transaction_ids } = await settled(ctx, period, i.account_id === undefined ? undefined : [i.account_id]);
+		const { rows, unknown_currency_transaction_ids } = await settled(ctx, { start: period.start }, i.account_id === undefined ? undefined : [i.account_id]);
 		const matched = rows.filter((t) => t.description.toLowerCase().includes(needle) || (t.merchant?.name.toLowerCase().includes(needle) ?? false))
 			.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
 		const payees = new Map<string, { payee: string; count: number }>();
@@ -250,10 +251,10 @@ const largeOrUnusual = query(
 		const lookback = wholeNumber(i.lookback_days, "lookback_days", 7, 730);
 		if (!(i.min_amount >= 0)) throw new Error("min_amount must be 0 or more");
 		const end = i.end === undefined ? Date.now() : instant(i.end, "end");
-		const start = i.start === undefined ? end - 30 * 864e5 : instant(i.start, "start");
+		const start = i.start === undefined ? Date.parse(nzDaysBefore(end, 30)) : instant(i.start, "start");
 		if (start >= end) throw new Error("start must be before end");
 		const period = { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
-		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: new Date(start - lookback * 864e5).toISOString(), end: period.end }, i.account_id === undefined ? undefined : [i.account_id]);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: nzDaysBefore(start, lookback), end: i.end }, i.account_id === undefined ? undefined : [i.account_id]);
 		return { period, debits: findUnusual(ofFlow(rows, "spending"), { ...period, minAmount: i.min_amount }), rules_applied, unknown_currency_transaction_ids };
 	},
 );
@@ -273,7 +274,7 @@ export const budgetStatus = query(
 		if (Date.parse(range.start) > now) throw new Error(`${month} has not started yet`);
 		const period = { start: range.start, end: new Date(Math.min(now, Date.parse(range.end))).toISOString() };
 		const elapsed = Math.min(1, (now - Date.parse(range.start)) / (Date.parse(range.end) + 1 - Date.parse(range.start)));
-		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: period.start, ...(now >= Date.parse(range.end) && { end: range.end }) });
 		const who = owner(ctx);
 		const spent = new Map<string, number>();
 		for (const t of ofFlow(rows, "spending")) {
@@ -306,7 +307,7 @@ export const investmentContributions = query(
 		const period = { start: i.start ?? monthsBack(now, 24), end: i.end ?? new Date(now).toISOString() };
 		instant(period.start, "start");
 		instant(period.end, "end");
-		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, period);
+		const { rows, rules_applied, unknown_currency_transaction_ids } = await settled(ctx, { start: period.start, end: i.end });
 		return {
 			period,
 			providers: contributions(rows).map(({ transactions, paid_in, withdrawn, net_contributed, ...p }) => ({
