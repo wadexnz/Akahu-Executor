@@ -1,5 +1,5 @@
 {
-  "name": "akahu",
+  "name": "@wadexnz.executor.community/akahu",
   "description": "NZ bank accounts and transactions for agents through an Akahu Personal App.",
   "private": true,
   "type": "module",

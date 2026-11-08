@@ -1,10 +1,26 @@
 # Akahu Executor
 
 A hosted [Executor](https://executor.sh) app that gives any agent connected to
-your Executor MCP endpoint access to your Akahu data as `tools.akahu.*`.
-Originally part of NZ Account Thread.
+your Executor MCP endpoint access to your Akahu data as `tools.akahu.*` (the
+app's slug). It was split out of
+[NZ Account Thread](https://github.com/wadexnz/NZ-account-thread), whose mobile
+app's flows, review inbox and design it follows.
 
-The deployed identifier remains `akahu` to preserve existing agent connections.
+Not affiliated with Akahu. It reads and changes nothing but your own data.
+
+## Install
+
+1. Get the app from the Executor directory
+   (`@wadexnz.executor.community/akahu`) with **Make a copy**, or deploy this
+   repository yourself (see [Develop and deploy](#develop-and-deploy)).
+2. Create an Akahu Personal App on the **Developers** page of
+   [my.akahu.nz](https://my.akahu.nz). Akahu requires identity verification and
+   two-factor sign-in, and its Developer Terms limit Personal Apps to your own,
+   non-commercial use: read them first.
+3. Connect your App ID Token and User Access Token in the app's **Accounts** tab.
+
+Each copy is yours: its accounts, database and schedules are not shared with
+this repository or other installs.
 
 ## Credentials
 
