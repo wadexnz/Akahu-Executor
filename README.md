@@ -285,9 +285,10 @@ one balance snapshot per account per NZ calendar day and raises these alerts:
 | `feed_inactive` | Akahu can no longer sync an account |
 
 Each alert is raised once, however often the check runs. It is stored for
-`monitor.alerts` and emitted as an `alert.raised` event (filter: `kind`) that
-MCP clients can subscribe to. The event carries only ids; the message, which
-includes amounts and merchant names, stays in the app. Transfers between your
+`monitor.alerts` and also emitted as an `alert.raised` event (filter: `kind`).
+Executor does not yet document a way to subscribe to app events, so read
+alerts with `monitor.alerts` or the dashboard. The event carries only ids; the
+message, which includes amounts and merchant names, stays in the app. Transfers between your
 own accounts, saving and your `memory` rules are left out as in the insights. If Akahu's
 transaction history cannot be read, balances and balance alerts are still saved
 and the result reports `transaction_checks: "failed"`.
